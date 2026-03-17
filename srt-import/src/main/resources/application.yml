@@ -3,13 +3,14 @@ spring:
   aop:
     proxy-target-class: true
 
-# DataSource
+# (JAF), 20260317, Reconfigured datasource from Oracle (OracleDriver, jdbc:oracle:thin) to MariaDB
+# DataSource - MariaDB
   datasource:
-    driver-class-name: oracle.jdbc.driver.OracleDriver
-    url: jdbc:oracle:thin:@docker:1521/xe.oracle.docker
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/oagi?useSSL=false&allowPublicKeyRetrieval=true
     username: oagi
     password: oagi
-    platform: oracle
+    platform: mysql
 
     continue-on-error: true
     initialize: false
@@ -21,7 +22,10 @@ spring:
       ddl-auto: none
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.Oracle12cDialect
+        # (JAF), 20260317, Changed dialect from Oracle12cDialect to MySQL5InnoDBDialect
+        dialect: org.hibernate.dialect.MySQL5InnoDBDialect
+        # (JAF), 20260317, Added: required to quote reserved words like 'release' in MariaDB
+        globally_quoted_identifiers: true
         id:
           new_generator_mappings: true
         cache:
@@ -38,17 +42,3 @@ logging:
     org.oagi.srt: DEBUG
     org.springframework: INFO
     org.hibernate.SQL: INFO
-
-# Staging environment
----
-spring:
-  profiles: staging
-
-# DataSource
-  datasource:
-    driver-class-name: oracle.jdbc.driver.OracleDriver
-    url: jdbc:oracle:thin:@localhost:1521/OAGISRTDB
-    username: oagi
-    password: oagi
-    platform: oracle
-    auto-commit: false

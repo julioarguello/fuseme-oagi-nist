@@ -77,13 +77,7 @@
 			<version>${commons.logging.version}</version>
 		</dependency>
 
-		<dependency>
-			<groupId>oracle</groupId>
-			<artifactId>ojdbc7</artifactId>
-			<version>1.0</version>
-			<scope>system</scope>
-			<systemPath>${project.basedir}/../Libraries/ojdbc7.jar</systemPath>
-		</dependency>
+		<!-- (JAF), 20260317, Removed Oracle JDBC system-scoped dep (ojdbc6.jar): using MariaDB instead -->
 		<dependency>
 			<groupId>log4j</groupId>
 			<artifactId>log4j</artifactId>
