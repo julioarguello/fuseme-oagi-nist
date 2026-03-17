@@ -5,7 +5,7 @@ import javax.persistence.Query;
 import javax.persistence.Table;
 import java.io.*;
 import java.lang.reflect.Field;
-import java.math.BigDecimal;
+
 import java.util.Collection;
 
 public class DataImportScriptPrinter {
@@ -72,9 +72,14 @@ public class DataImportScriptPrinter {
 
     public static long getEntityCount(EntityManager manager, Class<?> entityClass) {
         Table table = entityClass.getDeclaredAnnotation(Table.class);
-        Query query = manager.createNativeQuery("SELECT COUNT(*) FROM " + table.name().toUpperCase());
+        // (JAF), 20260317, Backtick-quote table name: native SQL bypasses
+        // globally_quoted_identifiers,
+        // and 'release' is a MariaDB reserved word
+        Query query = manager.createNativeQuery("SELECT COUNT(*) FROM `" + table.name() + "`");
         Object result = query.getSingleResult();
-        return ((BigDecimal) result).longValue();
+        // (JAF), 20260317, BigDecimal -> Number: MariaDB returns BigInteger, Oracle
+        // returns BigDecimal
+        return ((Number) result).longValue();
     }
 
     public static void turnOff() {

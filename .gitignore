@@ -22,3 +22,12 @@ docker-compose.yaml
 ~$*
 *.bak
 srt-webapp/src/main/resources/static/bower_components/**
+
+# fuseme-specific
+.agent
+score-db/
+json-schema/
+xsd2js-test/
+backup-oagis-10.3.sql
+scripts/
+xsd/
