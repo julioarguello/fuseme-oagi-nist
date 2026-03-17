@@ -3,9 +3,8 @@ package org.oagi.srt.repository.entity.converter;
 import org.oagi.srt.repository.entity.OagisComponentType;
 
 import javax.persistence.AttributeConverter;
-import javax.persistence.Converter;
 
-@Converter(autoApply = true)
+// (JAF), 20260317, Removed @Converter(autoApply=true): workaround for Hibernate 5.0.x duplicate converter registration bug
 public class OagisComponentTypeConverter
         implements AttributeConverter<OagisComponentType, Integer> {
 

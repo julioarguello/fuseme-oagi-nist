@@ -114,19 +114,13 @@
 			<version>3.6.1</version>
 			<scope>test</scope>
 		</dependency>
+		<!-- (JAF), 20260317, Changed scope from test to compile: MariaDB connector needed at runtime -->
 		<dependency>
 			<groupId>mysql</groupId>
 			<artifactId>mysql-connector-java</artifactId>
 			<version>5.1.40</version>
-			<scope>test</scope>
 		</dependency>
-		<dependency>
-			<groupId>oracle</groupId>
-			<artifactId>ojdbc7</artifactId>
-			<version>1.0</version>
-			<scope>system</scope>
-			<systemPath>${project.basedir}/../Libraries/ojdbc7.jar</systemPath>
-		</dependency>
+		<!-- (JAF), 20260317, Removed Oracle JDBC system-scoped dep (ojdbc6.jar): using MariaDB instead -->
 		<dependency>
 			<groupId>commons-dbcp</groupId>
 			<artifactId>commons-dbcp</artifactId>

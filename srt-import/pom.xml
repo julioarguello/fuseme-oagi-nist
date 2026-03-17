@@ -107,17 +107,11 @@
 			<version>9.7.0-7</version>
 		</dependency>
 
-		<dependency>
-			<groupId>oracle</groupId>
-			<artifactId>ojdbc7</artifactId>
-			<version>1.0</version>
-			<scope>system</scope>
-			<systemPath>${project.basedir}/../Libraries/ojdbc7.jar</systemPath>
-		</dependency>
+		<!-- (JAF), 20260317, Removed Oracle JDBC system-scoped dep (ojdbc6.jar): using MariaDB instead -->
 		<dependency>
 			<groupId>jdk.lib</groupId>
 			<artifactId>tools</artifactId>
-			<version>1.8.0_112</version>
+			<version>1.8.0_211</version>
 			<scope>system</scope>
 			<systemPath>${project.basedir}/../Libraries/tools.jar</systemPath>
 		</dependency>
