@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * (e.g., Redocly) to display allowed values without consulting external references.</p>
  *
  * @see TypeResolution
- * @see <a href="https://spec.openapis.org/oas/v3.0.3#schema-object">OAS 3.0.3 Schema Object</a>
+ * @see <a href="https://spec.openapis.org/oas/v3.1.0#schema-object">OAS 3.1.0 Schema Object</a>
  */
 @Component
 @Lazy

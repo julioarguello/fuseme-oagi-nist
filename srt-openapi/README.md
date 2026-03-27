@@ -1,6 +1,6 @@
-# srt-openapi — CC-to-OpenAPI 3.0 Generator
+# srt-openapi — CC-to-OpenAPI 3.1 Generator
 
-Generates [OpenAPI 3.0.3](https://spec.openapis.org/oas/v3.0.3) schemas from OAGIS **Core Components (CC)** stored in a MariaDB/MySQL database. The module walks the CC tree (ASCCP → ACC → BCC/ASCC) and produces a fully valid, lint-clean YAML specification.
+Generates [OpenAPI 3.1.0](https://spec.openapis.org/oas/v3.1.0) schemas from OAGIS **Core Components (CC)** stored in a MariaDB/MySQL database. The module walks the CC tree (ASCCP → ACC → BCC/ASCC) and produces a fully valid, lint-clean YAML specification.
 
 ## Key Features
 
@@ -135,7 +135,7 @@ srt-openapi/
     │   ├── GenerateOpenApiCommand.java  # CLI runner (profile: generate-openapi)
     │   ├── CcOpenApiGenerator.java      # Pipeline orchestrator
     │   ├── CcTreeWalker.java            # Recursive CC tree traversal
-    │   ├── OpenApiSchemaBuilder.java     # TreeResult → OpenAPI 3.0.3 Map
+    │   ├── OpenApiSchemaBuilder.java     # TreeResult → OpenAPI 3.1.0 Map
     │   └── TypeMapper.java              # XSD → OpenAPI type/format resolution
     └── resources/
         └── application.yml              # Default datasource config
@@ -247,7 +247,7 @@ Each Core Data Type has a single **default** CDT Primitive that determines its c
 
 `xsd:decimal` represents arbitrary-precision decimal numbers (analogous to Java's `BigDecimal`). The NIST import code (`Utility.checkCorrespondingTypes()`) explicitly treats `Decimal` and `Double` as distinct CDT Primitives.
 
-In OpenAPI 3.0:
+In OpenAPI 3.1:
 - `type: number, format: double` = IEEE 754 64-bit (~15 significant digits)
 - `type: number, format: float` = IEEE 754 32-bit (~7 significant digits)
 - `type: number` (no format) = **unconstrained numeric precision**
@@ -317,6 +317,97 @@ agencyIdentification:
 - **Enum at the type level, not the property level**: The allowed values are a property of the data type (BDT), not the individual BCCP. Every field referencing the same BDT gets the same enum constraint.
 - **Maximum model fidelity**: Enums enable client-side validation, IDE autocompletion, and documentation tooling (Redocly, Swagger UI) to display allowed values without external reference lookups.
 - **Source traceability**: `TypeResolution.enumSource` preserves the origin (e.g., `"CodeList: oacl_CurrencyCode"`) for debugging and auditing.
+
+---
+
+## OAS 3.1.0 Patterns
+
+The generator applies the following OpenAPI 3.1.0 best practices:
+
+### Nullable as Type Array
+
+OAS 3.0.x used `nullable: true` alongside `type`. OAS 3.1.0 aligns with JSON Schema and expresses nullability as a type array:
+
+```yaml
+# 3.0.x (old)
+type: string
+nullable: true
+
+# 3.1.0 (current)
+type:
+  - string
+  - "null"
+```
+
+Applied in `OpenApiSchemaBuilder.buildPrimitiveProperty()` for all nillable BCC properties.
+
+### `$ref` with Sibling Keywords
+
+In OAS 3.0.x, a `$ref` replaced the entire object, preventing sibling keywords like `description`. The workaround was an `allOf` wrapper:
+
+```yaml
+# 3.0.x workaround
+description: The buyer party
+allOf:
+  - $ref: '#/components/schemas/Party'
+
+# 3.1.0 (current) — direct siblings
+description: The buyer party
+$ref: '#/components/schemas/Party'
+```
+
+Applied in `OpenApiSchemaBuilder.buildAssociationProperty()` for non-array ASCC properties with descriptions.
+
+### Reusable ErrorResponse Schema
+
+Error responses (400, 404) reference a shared `ErrorResponse` schema in `components/schemas` instead of returning bare descriptions:
+
+```yaml
+ErrorResponse:
+  type: object
+  properties:
+    code:
+      type: integer
+      format: int32
+      description: HTTP status code
+    message:
+      type: string
+      description: Human-readable error message
+    details:
+      type: string
+      description: Additional diagnostic information
+  required:
+    - code
+    - message
+```
+
+### Path Parameter Descriptions
+
+All path parameters include a `description` field for linting completeness and documentation quality.
+
+### Discriminator on Polymorphic Base Schemas
+
+Base schemas with 2+ derived types and a natural `typeCode` BCC property receive an OAS 3.1.0 `discriminator` block with explicit mapping:
+
+```yaml
+Identification:
+  type: object
+  discriminator:
+    propertyName: typeCode
+    mapping:
+      AccountIdentification: '#/components/schemas/AccountIdentification'
+      AssetIdentification: '#/components/schemas/AssetIdentification'
+      # ... all 252 derived types
+  properties:
+    typeCode:
+      type: string
+    # ... other properties
+```
+
+Key design decisions:
+- **Conservative scope**: Only schemas with a pre-existing `typeCode` BCC qualify. No synthetic discriminator properties are injected.
+- **Purely additive**: The `discriminator` block is metadata for tools (Redocly, Swagger Codegen). It does not change validation behavior — `allOf` inheritance is preserved unchanged.
+- **Derived types map**: Computed in `CcTreeWalker` by reversing `baseSchemaMap` (child→parent) into parent→[sorted children].
 
 ---
 

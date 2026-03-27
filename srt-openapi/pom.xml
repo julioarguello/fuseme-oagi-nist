@@ -10,7 +10,7 @@
 
 	<name>oagi-srt-openapi</name>
 	<url>https://github.com/OAGi/OAGi-Semantic-Refinement-and-Tooling</url>
-	<description>CC-to-OpenAPI 3.0 schema generator for OAGIS Core Components</description>
+	<description>CC-to-OpenAPI 3.1 schema generator for OAGIS Core Components</description>
 
 	<parent>
 		<groupId>org.oagi</groupId>
