@@ -90,6 +90,7 @@ public class CcTreeWalker {
 		private final Map<String, List<CcNode>> schemas;
 		private final Map<String, String> baseSchemaMap;
 		private final Map<String, String> aliasMap;
+		private final Map<String, List<String>> derivedTypesMap;
 
 		TreeResult(String rootSchemaName, Map<String, List<CcNode>> schemas,
 		           Map<String, String> baseSchemaMap, Map<String, String> aliasMap) {
@@ -97,6 +98,7 @@ public class CcTreeWalker {
 			this.schemas = schemas;
 			this.baseSchemaMap = baseSchemaMap;
 			this.aliasMap = aliasMap;
+			this.derivedTypesMap = computeDerivedTypesMap(baseSchemaMap);
 		}
 
 		public String getRootSchemaName() { return rootSchemaName; }
@@ -105,6 +107,8 @@ public class CcTreeWalker {
 		public Map<String, String> getBaseSchemaMap() { return baseSchemaMap; }
 		/** Maps alias schema name -> canonical schema name (same ACC, different ASCCP). */
 		public Map<String, String> getAliasMap() { return aliasMap; }
+		/** Reverse of baseSchemaMap: base schema name -> list of derived schema names. */
+		public Map<String, List<String>> getDerivedTypesMap() { return derivedTypesMap; }
 	}
 
 	/**
@@ -115,6 +119,7 @@ public class CcTreeWalker {
 		private final Map<String, List<CcNode>> schemas;
 		private final Map<String, String> baseSchemaMap;
 		private final Map<String, String> aliasMap;
+		private final Map<String, List<String>> derivedTypesMap;
 
 		SuperTreeResult(List<String> rootSchemaNames,
 		                Map<String, List<CcNode>> schemas,
@@ -124,12 +129,15 @@ public class CcTreeWalker {
 			this.schemas = schemas;
 			this.baseSchemaMap = baseSchemaMap;
 			this.aliasMap = aliasMap;
+			this.derivedTypesMap = computeDerivedTypesMap(baseSchemaMap);
 		}
 
 		public List<String> getRootSchemaNames() { return rootSchemaNames; }
 		public Map<String, List<CcNode>> getSchemas() { return schemas; }
 		public Map<String, String> getBaseSchemaMap() { return baseSchemaMap; }
 		public Map<String, String> getAliasMap() { return aliasMap; }
+		/** Reverse of baseSchemaMap: base schema name -> list of derived schema names. */
+		public Map<String, List<String>> getDerivedTypesMap() { return derivedTypesMap; }
 	}
 
 	/**
@@ -302,6 +310,25 @@ public class CcTreeWalker {
 		).collect(Collectors.toList());
 
 		schemas.put(schemaName, sorted);
+	}
+
+	/**
+	 * Reverses baseSchemaMap (child -> parent) into a derived types map
+	 * (parent -> sorted list of children). Only entries with 2+ derived
+	 * types are meaningful for discriminator generation.
+	 */
+	private static Map<String, List<String>> computeDerivedTypesMap(
+			Map<String, String> baseSchemaMap) {
+		Map<String, List<String>> derived = new LinkedHashMap<>();
+		for (Map.Entry<String, String> entry : baseSchemaMap.entrySet()) {
+			derived.computeIfAbsent(entry.getValue(), k -> new ArrayList<>())
+					.add(entry.getKey());
+		}
+		// Sort each list for deterministic output
+		for (List<String> children : derived.values()) {
+			Collections.sort(children);
+		}
+		return Collections.unmodifiableMap(derived);
 	}
 
 	private static String toCamelCase(String term) {

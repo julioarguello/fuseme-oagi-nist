@@ -10,11 +10,12 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * Converts the CcTreeWalker output into an OpenAPI 3.0.3 schema structure
+ * Converts the CcTreeWalker output into an OpenAPI 3.1.0 schema structure
  * represented as nested Maps (ready for YAML/JSON serialization).
  *
- * Uses allOf composition for ACC inheritance (based_acc_id) and correctly
- * wraps $ref with description using allOf (OAS 3.0.3 compliance).
+ * Uses allOf composition for ACC inheritance (based_acc_id). In OAS 3.1.0,
+ * $ref can coexist with sibling keywords like description, so no allOf
+ * wrapper is needed for association properties.
  */
 @Component
 @Lazy
@@ -24,11 +25,11 @@ public class OpenApiSchemaBuilder {
 	private TypeMapper typeMapper;
 
 	/**
-	 * Build a complete OpenAPI 3.0.3 document from a tree walk result.
+	 * Build a complete OpenAPI 3.1.0 document from a tree walk result.
 	 */
 	public Map<String, Object> build(TreeResult treeResult, String title, String rootSchemaName) {
 		Map<String, Object> doc = new LinkedHashMap<>();
-		doc.put("openapi", "3.0.3");
+		doc.put("openapi", "3.1.0");
 
 		Map<String, Object> info = new LinkedHashMap<>();
 		info.put("title", title);
@@ -52,7 +53,8 @@ public class OpenApiSchemaBuilder {
 		doc.put("paths", buildPaths(Collections.singletonList(rootSchemaName)));
 
 		Map<String, Object> components = buildComponents(treeResult.getSchemas(),
-				treeResult.getBaseSchemaMap(), treeResult.getAliasMap());
+				treeResult.getBaseSchemaMap(), treeResult.getAliasMap(),
+				treeResult.getDerivedTypesMap());
 		addSecuritySchemes(components);
 		doc.put("components", components);
 
@@ -60,11 +62,11 @@ public class OpenApiSchemaBuilder {
 	}
 
 	/**
-	 * Build a super-schema OpenAPI 3.0.3 document from all root nouns.
+	 * Build a super-schema OpenAPI 3.1.0 document from all root nouns.
 	 */
 	public Map<String, Object> buildSuper(SuperTreeResult superResult, String title) {
 		Map<String, Object> doc = new LinkedHashMap<>();
-		doc.put("openapi", "3.0.3");
+		doc.put("openapi", "3.1.0");
 
 		Map<String, Object> info = new LinkedHashMap<>();
 		info.put("title", title);
@@ -99,7 +101,8 @@ public class OpenApiSchemaBuilder {
 		doc.put("paths", buildPaths(superResult.getRootSchemaNames()));
 
 		Map<String, Object> components = buildComponents(superResult.getSchemas(),
-				superResult.getBaseSchemaMap(), superResult.getAliasMap());
+				superResult.getBaseSchemaMap(), superResult.getAliasMap(),
+				superResult.getDerivedTypesMap());
 		addSecuritySchemes(components);
 		doc.put("components", components);
 
@@ -112,7 +115,8 @@ public class OpenApiSchemaBuilder {
 	private Map<String, Object> buildComponents(
 			Map<String, List<CcNode>> schemaNodes,
 			Map<String, String> baseMap,
-			Map<String, String> aliasMapData) {
+			Map<String, String> aliasMapData,
+			Map<String, List<String>> derivedTypesMap) {
 		Map<String, Object> components = new LinkedHashMap<>();
 		Map<String, Object> schemas = new LinkedHashMap<>();
 
@@ -120,7 +124,9 @@ public class OpenApiSchemaBuilder {
 			String schemaName = entry.getKey();
 			List<CcNode> nodes = entry.getValue();
 			String baseName = baseMap.get(schemaName);
-			schemas.put(schemaName, buildSchema(nodes, baseName));
+			List<String> derivedTypes = derivedTypesMap.getOrDefault(schemaName,
+					Collections.emptyList());
+			schemas.put(schemaName, buildSchema(nodes, baseName, derivedTypes));
 		}
 
 		// Generate alias schemas for ACCs referenced under multiple names
@@ -133,6 +139,9 @@ public class OpenApiSchemaBuilder {
 			aliasSchema.put("allOf", allOfList);
 			schemas.put(alias.getKey(), aliasSchema);
 		}
+
+		// Reusable error response schema
+		schemas.put("ErrorResponse", buildErrorResponseSchema());
 
 		components.put("schemas", schemas);
 		return components;
@@ -263,6 +272,7 @@ public class OpenApiSchemaBuilder {
 		idParam.put("name", "id");
 		idParam.put("in", "path");
 		idParam.put("required", true);
+		idParam.put("description", "Unique resource identifier");
 		Map<String, Object> idSchema = new LinkedHashMap<>();
 		idSchema.put("type", "string");
 		idParam.put("schema", idSchema);
@@ -295,22 +305,60 @@ public class OpenApiSchemaBuilder {
 		return content;
 	}
 
-	/** Build a minimal error response with only a description. */
+	/** Build a structured error response referencing the reusable ErrorResponse schema. */
 	private Map<String, Object> errorResponse(String description) {
 		Map<String, Object> resp = new LinkedHashMap<>();
 		resp.put("description", description);
+		Map<String, Object> schemaRef = new LinkedHashMap<>();
+		schemaRef.put("$ref", "#/components/schemas/ErrorResponse");
+		resp.put("content", jsonContent(schemaRef));
 		return resp;
+	}
+
+	/** Build the reusable ErrorResponse schema with code, message, and details. */
+	private Map<String, Object> buildErrorResponseSchema() {
+		Map<String, Object> schema = new LinkedHashMap<>();
+		schema.put("type", "object");
+
+		Map<String, Object> properties = new LinkedHashMap<>();
+
+		Map<String, Object> code = new LinkedHashMap<>();
+		code.put("type", "integer");
+		code.put("format", "int32");
+		code.put("description", "HTTP status code");
+		properties.put("code", code);
+
+		Map<String, Object> message = new LinkedHashMap<>();
+		message.put("type", "string");
+		message.put("description", "Human-readable error message");
+		properties.put("message", message);
+
+		Map<String, Object> details = new LinkedHashMap<>();
+		details.put("type", "string");
+		details.put("description", "Additional diagnostic information");
+		properties.put("details", details);
+
+		schema.put("properties", properties);
+		schema.put("required", Arrays.asList("code", "message"));
+
+		return schema;
 	}
 
 	/**
 	 * Build a single schema. If baseName is non-null, uses allOf composition
-	 * to extend the base schema.
+	 * to extend the base schema. If derivedTypes is non-empty and the schema
+	 * contains a {@code typeCode} BCC, emits an OAS 3.1.0 discriminator block.
 	 */
-	private Map<String, Object> buildSchema(List<CcNode> nodes, String baseName) {
+	private Map<String, Object> buildSchema(List<CcNode> nodes, String baseName,
+	                                        List<String> derivedTypes) {
 		Map<String, Object> ownProps = buildOwnProperties(nodes);
 
+		// Add discriminator for polymorphic base schemas with typeCode property
+		if (derivedTypes.size() >= 2 && hasTypeCodeProperty(nodes)) {
+			ownProps.put("discriminator", buildDiscriminator(derivedTypes));
+		}
+
 		if (baseName == null) {
-			// No inheritance: standard object schema
 			return ownProps;
 		}
 
@@ -329,6 +377,35 @@ public class OpenApiSchemaBuilder {
 
 		schema.put("allOf", allOfList);
 		return schema;
+	}
+
+	/**
+	 * Check if any BCC node in the schema has a property named "typeCode".
+	 * Only schemas with this natural discriminator field qualify for
+	 * discriminator annotation.
+	 */
+	private boolean hasTypeCodeProperty(List<CcNode> nodes) {
+		return nodes.stream()
+				.filter(n -> n.getKind() == CcNode.Kind.BCC_ELEMENT
+						|| n.getKind() == CcNode.Kind.BCC_ATTRIBUTE)
+				.anyMatch(n -> "typeCode".equals(n.getPropertyName()));
+	}
+
+	/**
+	 * Build an OAS 3.1.0 discriminator object with explicit mapping of
+	 * derived type names to their schema references.
+	 */
+	private Map<String, Object> buildDiscriminator(List<String> derivedTypes) {
+		Map<String, Object> discriminator = new LinkedHashMap<>();
+		discriminator.put("propertyName", "typeCode");
+
+		Map<String, String> mapping = new LinkedHashMap<>();
+		for (String derived : derivedTypes) {
+			mapping.put(derived, "#/components/schemas/" + derived);
+		}
+		discriminator.put("mapping", mapping);
+
+		return discriminator;
 	}
 
 	private Map<String, Object> buildOwnProperties(List<CcNode> nodes) {
@@ -408,7 +485,11 @@ public class OpenApiSchemaBuilder {
 		}
 
 		if (node.isNillable()) {
-			prop.put("nullable", true);
+			// OAS 3.1.0: nullable expressed as type array instead of nullable keyword
+			Object currentType = prop.get("type");
+			if (currentType != null) {
+				prop.put("type", Arrays.asList(currentType, "null"));
+			}
 		}
 		if (node.getDefaultValue() != null && !node.getDefaultValue().isEmpty()) {
 			prop.put("default", node.getDefaultValue());
@@ -418,9 +499,8 @@ public class OpenApiSchemaBuilder {
 	}
 
 	/**
-	 * Build an association (ASCC) property. In OAS 3.0.3, $ref cannot coexist
-	 * with sibling keywords like description. When a description exists for a
-	 * non-array $ref, we wrap it using allOf.
+	 * Build an association (ASCC) property. In OAS 3.1.0, $ref can coexist
+	 * with sibling keywords like description, so no allOf wrapper is needed.
 	 */
 	private Map<String, Object> buildAssociationProperty(CcNode node) {
 		Map<String, Object> prop = new LinkedHashMap<>();
@@ -439,15 +519,11 @@ public class OpenApiSchemaBuilder {
 			if (node.getCardinalityMin() > 0) {
 				prop.put("minItems", node.getCardinalityMin());
 			}
-		} else if (hasDesc) {
-			// OAS 3.0.3: $ref replaces the entire object; use allOf wrapper
-			prop.put("description", node.getDescription());
-			List<Object> allOfList = new ArrayList<>();
-			Map<String, Object> refObj = new LinkedHashMap<>();
-			refObj.put("$ref", ref);
-			allOfList.add(refObj);
-			prop.put("allOf", allOfList);
 		} else {
+			// OAS 3.1.0: $ref allows sibling keywords — no allOf wrapper needed
+			if (hasDesc) {
+				prop.put("description", node.getDescription());
+			}
 			prop.put("$ref", ref);
 		}
 
