@@ -88,8 +88,11 @@ public class CcOpenApiGenerator {
 
 		File outputFile = new File(outputDir, fileName);
 
+		// MINIMIZE_QUOTES is intentionally disabled: it strips quotes from
+		// numeric-looking strings (e.g. "1" → 1), which breaks OpenAPI
+		// type:string enums and causes Redocly no-enum-type-mismatch errors.
+		// Jackson 2.8 (Spring Boot 1.5) lacks ALWAYS_QUOTE_NUMBERS_AS_STRINGS.
 		YAMLFactory yamlFactory = new YAMLFactory()
-				.enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
 				.disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER);
 
 		ObjectMapper yamlMapper = new ObjectMapper(yamlFactory);

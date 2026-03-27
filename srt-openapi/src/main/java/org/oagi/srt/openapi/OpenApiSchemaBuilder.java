@@ -44,11 +44,17 @@ public class OpenApiSchemaBuilder {
 		servers.add(server);
 		doc.put("servers", servers);
 
+		// Global security — reference the scheme declared in components
+		doc.put("security", Collections.singletonList(
+				Collections.singletonMap("bearerAuth", Collections.emptyList())));
+
 		// Generate paths referencing the root schema so renderers (Redocly) display it
 		doc.put("paths", buildPaths(Collections.singletonList(rootSchemaName)));
 
-		doc.put("components", buildComponents(treeResult.getSchemas(),
-				treeResult.getBaseSchemaMap(), treeResult.getAliasMap()));
+		Map<String, Object> components = buildComponents(treeResult.getSchemas(),
+				treeResult.getBaseSchemaMap(), treeResult.getAliasMap());
+		addSecuritySchemes(components);
+		doc.put("components", components);
 
 		return doc;
 	}
@@ -85,11 +91,17 @@ public class OpenApiSchemaBuilder {
 		}
 		doc.put("tags", tags);
 
+		// Global security — reference the scheme declared in components
+		doc.put("security", Collections.singletonList(
+				Collections.singletonMap("bearerAuth", Collections.emptyList())));
+
 		// Build paths for all roots
 		doc.put("paths", buildPaths(superResult.getRootSchemaNames()));
 
-		doc.put("components", buildComponents(superResult.getSchemas(),
-				superResult.getBaseSchemaMap(), superResult.getAliasMap()));
+		Map<String, Object> components = buildComponents(superResult.getSchemas(),
+				superResult.getBaseSchemaMap(), superResult.getAliasMap());
+		addSecuritySchemes(components);
+		doc.put("components", components);
 
 		return doc;
 	}
@@ -127,6 +139,22 @@ public class OpenApiSchemaBuilder {
 	}
 
 	/**
+	 * Add OAuth2/Bearer security scheme to the components section.
+	 * Prevents Redocly {@code security-defined} errors by declaring the
+	 * scheme referenced by the global {@code security} block.
+	 */
+	private void addSecuritySchemes(Map<String, Object> components) {
+		Map<String, Object> securitySchemes = new LinkedHashMap<>();
+		Map<String, Object> bearer = new LinkedHashMap<>();
+		bearer.put("type", "http");
+		bearer.put("scheme", "bearer");
+		bearer.put("bearerFormat", "JWT");
+		bearer.put("description", "JWT token for API authentication");
+		securitySchemes.put("bearerAuth", bearer);
+		components.put("securitySchemes", securitySchemes);
+	}
+
+	/**
 	 * Build CRUD-style paths for one or more root schemas.
 	 */
 	private Map<String, Object> buildPaths(List<String> rootSchemaNames) {
@@ -142,73 +170,94 @@ public class OpenApiSchemaBuilder {
 
 			// Collection endpoint
 			Map<String, Object> collectionOps = new LinkedHashMap<>();
-			collectionOps.put("get", buildOperation(
-					"List " + rootSchemaName + " resources",
-					"200", "array", ref, rootSchemaName));
-			collectionOps.put("post", buildOperation(
-					"Create a " + rootSchemaName,
-					"201", null, ref, rootSchemaName));
+			collectionOps.put("get", buildListOperation(rootSchemaName, ref));
+			collectionOps.put("post", buildCreateOperation(rootSchemaName, ref));
 			paths.put("/" + pathSegment, collectionOps);
 
 			// Item endpoint
 			Map<String, Object> itemOps = new LinkedHashMap<>();
-			itemOps.put("get", buildItemOperation(
-					"Get a " + rootSchemaName + " by ID", ref, rootSchemaName));
+			itemOps.put("get", buildGetOperation(rootSchemaName, ref));
 			paths.put("/" + pathSegment + "/{id}", itemOps);
 		}
 
 		return paths;
 	}
 
-	private Map<String, Object> buildOperation(
-			String summary, String statusCode, String wrapType, String ref, String tag) {
+	/**
+	 * Build a GET (list) operation with {@code operationId} and a 200 array response.
+	 */
+	private Map<String, Object> buildListOperation(String schemaName, String ref) {
 		Map<String, Object> op = new LinkedHashMap<>();
-		op.put("summary", summary);
-		op.put("tags", Collections.singletonList(tag));
-
-		// Request body for POST
-		if ("201".equals(statusCode)) {
-			Map<String, Object> reqBody = new LinkedHashMap<>();
-			reqBody.put("required", true);
-			Map<String, Object> content = new LinkedHashMap<>();
-			Map<String, Object> json = new LinkedHashMap<>();
-			Map<String, Object> schemaRef = new LinkedHashMap<>();
-			schemaRef.put("$ref", ref);
-			json.put("schema", schemaRef);
-			content.put("application/json", json);
-			reqBody.put("content", content);
-			op.put("requestBody", reqBody);
-		}
+		op.put("operationId", "list" + schemaName);
+		op.put("summary", "List " + schemaName + " resources");
+		op.put("tags", Collections.singletonList(schemaName));
 
 		Map<String, Object> responses = new LinkedHashMap<>();
-		Map<String, Object> resp = new LinkedHashMap<>();
-		resp.put("description", "Successful response");
-		Map<String, Object> content = new LinkedHashMap<>();
-		Map<String, Object> json = new LinkedHashMap<>();
+
+		// 200 — array of resources
+		Map<String, Object> okResp = new LinkedHashMap<>();
+		okResp.put("description", "Successful response");
 		Map<String, Object> schema = new LinkedHashMap<>();
+		schema.put("type", "array");
+		Map<String, Object> items = new LinkedHashMap<>();
+		items.put("$ref", ref);
+		schema.put("items", items);
+		okResp.put("content", jsonContent(schema));
+		responses.put("200", okResp);
 
-		if ("array".equals(wrapType)) {
-			schema.put("type", "array");
-			Map<String, Object> items = new LinkedHashMap<>();
-			items.put("$ref", ref);
-			schema.put("items", items);
-		} else {
-			schema.put("$ref", ref);
-		}
+		// 400 — bad request
+		responses.put("400", errorResponse("Bad request"));
 
-		json.put("schema", schema);
-		content.put("application/json", json);
-		resp.put("content", content);
-		responses.put(statusCode, resp);
 		op.put("responses", responses);
 		return op;
 	}
 
-	private Map<String, Object> buildItemOperation(String summary, String ref, String tag) {
+	/**
+	 * Build a POST (create) operation with {@code operationId}, request body,
+	 * and 201/400 responses.
+	 */
+	private Map<String, Object> buildCreateOperation(String schemaName, String ref) {
 		Map<String, Object> op = new LinkedHashMap<>();
-		op.put("summary", summary);
-		op.put("tags", Collections.singletonList(tag));
+		op.put("operationId", "create" + schemaName);
+		op.put("summary", "Create a " + schemaName);
+		op.put("tags", Collections.singletonList(schemaName));
 
+		// Request body
+		Map<String, Object> reqBody = new LinkedHashMap<>();
+		reqBody.put("required", true);
+		Map<String, Object> schemaRef = new LinkedHashMap<>();
+		schemaRef.put("$ref", ref);
+		reqBody.put("content", jsonContent(schemaRef));
+		op.put("requestBody", reqBody);
+
+		Map<String, Object> responses = new LinkedHashMap<>();
+
+		// 201 — created
+		Map<String, Object> createdResp = new LinkedHashMap<>();
+		createdResp.put("description", "Resource created");
+		Map<String, Object> respRef = new LinkedHashMap<>();
+		respRef.put("$ref", ref);
+		createdResp.put("content", jsonContent(respRef));
+		responses.put("201", createdResp);
+
+		// 400 — bad request
+		responses.put("400", errorResponse("Bad request"));
+
+		op.put("responses", responses);
+		return op;
+	}
+
+	/**
+	 * Build a GET-by-ID (item) operation with {@code operationId}, path parameter,
+	 * and 200/404 responses.
+	 */
+	private Map<String, Object> buildGetOperation(String schemaName, String ref) {
+		Map<String, Object> op = new LinkedHashMap<>();
+		op.put("operationId", "get" + schemaName);
+		op.put("summary", "Get a " + schemaName + " by ID");
+		op.put("tags", Collections.singletonList(schemaName));
+
+		// Path parameter
 		List<Map<String, Object>> params = new ArrayList<>();
 		Map<String, Object> idParam = new LinkedHashMap<>();
 		idParam.put("name", "id");
@@ -221,18 +270,36 @@ public class OpenApiSchemaBuilder {
 		op.put("parameters", params);
 
 		Map<String, Object> responses = new LinkedHashMap<>();
-		Map<String, Object> resp = new LinkedHashMap<>();
-		resp.put("description", "Successful response");
-		Map<String, Object> content = new LinkedHashMap<>();
-		Map<String, Object> json = new LinkedHashMap<>();
-		Map<String, Object> schemaRef = new LinkedHashMap<>();
-		schemaRef.put("$ref", ref);
-		json.put("schema", schemaRef);
-		content.put("application/json", json);
-		resp.put("content", content);
-		responses.put("200", resp);
+
+		// 200 — found
+		Map<String, Object> okResp = new LinkedHashMap<>();
+		okResp.put("description", "Successful response");
+		Map<String, Object> respRef = new LinkedHashMap<>();
+		respRef.put("$ref", ref);
+		okResp.put("content", jsonContent(respRef));
+		responses.put("200", okResp);
+
+		// 404 — not found
+		responses.put("404", errorResponse("Resource not found"));
+
 		op.put("responses", responses);
 		return op;
+	}
+
+	/** Wrap a schema map as {@code application/json} content. */
+	private Map<String, Object> jsonContent(Map<String, Object> schema) {
+		Map<String, Object> json = new LinkedHashMap<>();
+		json.put("schema", schema);
+		Map<String, Object> content = new LinkedHashMap<>();
+		content.put("application/json", json);
+		return content;
+	}
+
+	/** Build a minimal error response with only a description. */
+	private Map<String, Object> errorResponse(String description) {
+		Map<String, Object> resp = new LinkedHashMap<>();
+		resp.put("description", description);
+		return resp;
 	}
 
 	/**

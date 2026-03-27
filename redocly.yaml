@@ -1,0 +1,13 @@
+# Redocly lint configuration for the OAGIS super-schema.
+#
+# The generator produces full CRUD paths with operationId, security,
+# and 4xx error responses.  Only the placeholder server URL is suppressed.
+
+extends:
+  - recommended
+
+rules:
+  info-license: off
+  no-unused-components: off
+  no-empty-servers: off
+  no-server-example.com: off   # Legitimate: reference schema uses placeholder URL
