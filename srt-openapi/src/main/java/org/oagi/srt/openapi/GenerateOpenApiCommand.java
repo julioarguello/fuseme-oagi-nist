@@ -14,10 +14,10 @@ import java.io.File;
  * Spring Boot CLI runner that invokes the CC-to-OpenAPI generator.
  *
  * Activated by the Spring profile "generate-openapi".
- * Usage:
- *   java -jar srt-openapi.jar --spring.profiles.active=generate-openapi \
- *       --openapi.asccp="Purchase Order" \
- *       --openapi.output=./output
+ * Usage (single noun):
+ *   java ... --openapi.asccp="Purchase Order" --openapi.output=./output
+ * Usage (super schema):
+ *   java ... --openapi.mode=super --openapi.output=./output
  */
 @Component
 @Profile("generate-openapi")
@@ -34,14 +34,25 @@ public class GenerateOpenApiCommand implements CommandLineRunner {
 	@Value("${openapi.output:./openapi-output}")
 	private String outputPath;
 
+	@Value("${openapi.mode:single}")
+	private String mode;
+
 	@Override
 	public void run(String... args) throws Exception {
 		logger.info("=== CC-to-OpenAPI Generator ===");
-		logger.info("ASCCP: {}", asccpPropertyTerm);
+		logger.info("Mode: {}", mode);
 		logger.info("Output: {}", outputPath);
 
 		File outputDir = new File(outputPath);
-		File result = generator.generate(asccpPropertyTerm, outputDir);
+		File result;
+
+		if ("super".equalsIgnoreCase(mode)) {
+			logger.info("Generating super-schema (all root nouns)...");
+			result = generator.generateSuper(outputDir);
+		} else {
+			logger.info("ASCCP: {}", asccpPropertyTerm);
+			result = generator.generate(asccpPropertyTerm, outputDir);
+		}
 
 		logger.info("=== Generation complete: {} ===", result.getAbsolutePath());
 	}

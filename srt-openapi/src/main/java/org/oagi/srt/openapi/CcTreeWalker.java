@@ -2,6 +2,8 @@ package org.oagi.srt.openapi;
 
 import org.oagi.srt.provider.ImportedDataProvider;
 import org.oagi.srt.repository.entity.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,8 @@ import java.util.stream.Stream;
 @Component
 @Lazy
 public class CcTreeWalker {
+
+	private final Logger logger = LoggerFactory.getLogger(getClass());
 
 	@Autowired
 	private ImportedDataProvider importedDataProvider;
@@ -104,6 +108,31 @@ public class CcTreeWalker {
 	}
 
 	/**
+	 * Multi-root result: all root nouns merged into one schema set.
+	 */
+	public static class SuperTreeResult {
+		private final List<String> rootSchemaNames;
+		private final Map<String, List<CcNode>> schemas;
+		private final Map<String, String> baseSchemaMap;
+		private final Map<String, String> aliasMap;
+
+		SuperTreeResult(List<String> rootSchemaNames,
+		                Map<String, List<CcNode>> schemas,
+		                Map<String, String> baseSchemaMap,
+		                Map<String, String> aliasMap) {
+			this.rootSchemaNames = rootSchemaNames;
+			this.schemas = schemas;
+			this.baseSchemaMap = baseSchemaMap;
+			this.aliasMap = aliasMap;
+		}
+
+		public List<String> getRootSchemaNames() { return rootSchemaNames; }
+		public Map<String, List<CcNode>> getSchemas() { return schemas; }
+		public Map<String, String> getBaseSchemaMap() { return baseSchemaMap; }
+		public Map<String, String> getAliasMap() { return aliasMap; }
+	}
+
+	/**
 	 * Walk the CC tree starting from a named ASCCP.
 	 */
 	public TreeResult walk(String asccpPropertyTerm) {
@@ -114,6 +143,61 @@ public class CcTreeWalker {
 						"ASCCP not found: " + asccpPropertyTerm));
 
 		return walkFromAsccp(asccp);
+	}
+
+	/**
+	 * Walk ALL non-reusable, published ASCCPs and merge their trees into a
+	 * single SuperTreeResult. Shared ACCs are deduplicated across all walks.
+	 */
+	public SuperTreeResult walkAll() {
+		List<AssociationCoreComponentProperty> allAsccp = importedDataProvider.findASCCP();
+
+		// Filter to root business documents: non-reusable and published
+		List<AssociationCoreComponentProperty> roots = allAsccp.stream()
+				.filter(a -> !a.isReusableIndicator())
+				.filter(a -> a.getState() == CoreComponentState.Published)
+				.sorted(Comparator.comparing(AssociationCoreComponentProperty::getPropertyTerm))
+				.collect(Collectors.toList());
+
+		logger.info("walkAll: {} total ASCCPs, {} root nouns after filtering",
+				allAsccp.size(), roots.size());
+
+		// Use LinkedHashSet to deduplicate root names while preserving order
+		Set<String> rootSchemaNameSet = new LinkedHashSet<>();
+		Map<String, List<CcNode>> mergedSchemas = new LinkedHashMap<>();
+		Map<String, String> mergedBaseMap = new LinkedHashMap<>();
+		Map<String, String> mergedAliasMap = new LinkedHashMap<>();
+		// Shared across all walks for cross-noun deduplication
+		Map<Long, String> sharedAccIdToSchemaName = new HashMap<>();
+
+		int count = 0;
+		for (AssociationCoreComponentProperty asccp : roots) {
+			count++;
+			AggregateCoreComponent roleOfAcc = importedDataProvider.findACC(asccp.getRoleOfAccId());
+			if (roleOfAcc == null) {
+				logger.warn("Skipping ASCCP '{}': roleOfAcc not found (id={})",
+						asccp.getPropertyTerm(), asccp.getRoleOfAccId());
+				continue;
+			}
+
+			// Derive root name from ACC objectClassTerm (business document name)
+			// instead of ASCCP propertyTerm which is too generic (e.g., "Data Area")
+			String rootName = toCamelCase(roleOfAcc.getObjectClassTerm());
+			logger.info("  [{}/{}] Walking root: {} (ASCCP ID={}, ACC='{}')",
+					count, roots.size(), rootName, asccp.getAsccpId(),
+					roleOfAcc.getObjectClassTerm());
+
+			rootSchemaNameSet.add(rootName);
+			walkAcc(roleOfAcc, rootName, mergedSchemas, mergedBaseMap,
+					mergedAliasMap, sharedAccIdToSchemaName);
+		}
+
+		List<String> rootSchemaNames = new ArrayList<>(rootSchemaNameSet);
+		logger.info("walkAll complete: {} roots ({} unique), {} schemas, {} aliases",
+				roots.size(), rootSchemaNames.size(),
+				mergedSchemas.size(), mergedAliasMap.size());
+
+		return new SuperTreeResult(rootSchemaNames, mergedSchemas, mergedBaseMap, mergedAliasMap);
 	}
 
 	/**
