@@ -97,11 +97,11 @@ public class TypeMapper {
 	/**
 	 * Resolves a BCCP's data type (bdtId) to an OpenAPI {@link TypeResolution}.
 	 *
-	 * <p>The resolution follows the chain documented in this class's Javadoc.
-	 * When the default {@link BusinessDataTypePrimitiveRestriction} points to a
-	 * {@link CodeList} or {@link AgencyIdList}, the returned resolution includes
-	 * the allowed enum values extracted from {@link CodeListValue#getValue()} or
-	 * {@link AgencyIdListValue#getValue()} respectively.</p>
+	 * <p>The resolution scans <strong>all</strong> restrictions for the given BDT,
+	 * not just the default one. In OAGIS, code list restrictions are stored as
+	 * <em>non-default</em> entries ({@code is_default = 0}) in {@code BDT_PRI_RESTRI},
+	 * while the default entry points to the CDT primitive type. This method
+	 * prioritizes code list / agency ID list hits over the primitive fallback.</p>
 	 *
 	 * @param bdtId the Business Data Type identifier from {@code BCCP.bdtId}
 	 * @return a {@link TypeResolution} carrying type, format, and optional enum values
@@ -111,25 +111,30 @@ public class TypeMapper {
 		List<BusinessDataTypePrimitiveRestriction> restrictions =
 				importedDataProvider.findBdtPriRestriListByDtId(bdtId);
 
-		// Find the default restriction entry
-		BusinessDataTypePrimitiveRestriction defaultRestri = restrictions.stream()
-				.filter(BusinessDataTypePrimitiveRestriction::isDefault)
-				.findFirst()
-				.orElse(restrictions.isEmpty() ? null : restrictions.get(0));
-
-		if (defaultRestri == null) {
+		if (restrictions == null || restrictions.isEmpty()) {
 			return new TypeResolution("string", null);
 		}
 
-		// Code list restriction: resolve enum values from CodeListValue entries
-		if (defaultRestri.getCodeListId() > 0) {
-			return resolveCodeListEnum(defaultRestri.getCodeListId());
+		// Priority 1: scan ALL restrictions for a code list (regardless of is_default).
+		// OAGIS marks code list restrictions as non-default alternatives.
+		for (BusinessDataTypePrimitiveRestriction restri : restrictions) {
+			if (restri.getCodeListId() > 0) {
+				return resolveCodeListEnum(restri.getCodeListId());
+			}
 		}
 
-		// Agency ID list restriction: resolve enum values from AgencyIdListValue entries
-		if (defaultRestri.getAgencyIdListId() > 0) {
-			return resolveAgencyIdListEnum(defaultRestri.getAgencyIdListId());
+		// Priority 2: scan ALL restrictions for an agency ID list.
+		for (BusinessDataTypePrimitiveRestriction restri : restrictions) {
+			if (restri.getAgencyIdListId() > 0) {
+				return resolveAgencyIdListEnum(restri.getAgencyIdListId());
+			}
 		}
+
+		// Priority 3: fall back to primitive type via the default restriction.
+		BusinessDataTypePrimitiveRestriction defaultRestri = restrictions.stream()
+				.filter(BusinessDataTypePrimitiveRestriction::isDefault)
+				.findFirst()
+				.orElse(restrictions.get(0));
 
 		long cdtAwdPriXpsTypeMapId = defaultRestri.getCdtAwdPriXpsTypeMapId();
 		if (cdtAwdPriXpsTypeMapId <= 0) {

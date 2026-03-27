@@ -29,6 +29,9 @@ score-db/
 json-schema/
 xsd2js-test/
 backup-oagis-10.3.sql
-scripts/
-xsd/openapi-output/
+xsd/
+openapi-output/
 Libraries/
+
+# dist/ is explicitly tracked (generated spec for GitHub raw URL consumption)
+!dist/

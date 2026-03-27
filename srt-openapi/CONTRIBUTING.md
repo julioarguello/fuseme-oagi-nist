@@ -8,6 +8,27 @@ Follow the [README](README.md) "Getting Started" section to set up your environm
 2. MariaDB 10.6 on `127.0.0.1:3306` with `oagi` database populated
 3. `mvn -pl srt-openapi compile -q` to build
 
+## Pipeline: `scripts/srt-openapi.sh`
+
+The pipeline script automates the full lifecycle: **compile → generate → validate → distribute**.
+
+```bash
+# Full pipeline (compile + generate + lint + copy to dist/)
+./scripts/srt-openapi.sh
+
+# Skip compilation (reuse existing build)
+./scripts/srt-openapi.sh --skip-compile
+```
+
+**What the pipeline does:**
+
+1. **Compile** — `mvn -pl srt-openapi compile -q` (skippable with `--skip-compile`)
+2. **Generate** — runs `OpenApiApplication` against the MariaDB `oagi` database
+3. **Validate** — `npx @redocly/cli lint` against `redocly.yaml`
+4. **Distribute** — copies validated spec to `dist/oagis-super-schema.yaml`
+
+**Acceptance criteria:** The pipeline must exit 0 with `"Your API description is valid."` and 0 errors, 0 warnings.
+
 ## Module Structure
 
 This module depends on `srt-import` for:
@@ -42,6 +63,28 @@ Edit the `XSD_TO_OPENAPI` static map in `TypeMapper.java`.
 ### Changing the generated paths
 
 Edit `OpenApiSchemaBuilder.buildPaths()` to modify the REST endpoint structure.
+Each root schema gets three operations with distinct `operationId` values:
+
+| Verb | Path | `operationId` | Responses |
+|:-----|:-----|:---------------|:----------|
+| GET  | `/{noun}` | `list{Noun}` | 200, 400 |
+| POST | `/{noun}` | `create{Noun}` | 201, 400 |
+| GET  | `/{noun}/{id}` | `get{Noun}` | 200, 404 |
+
+### Enum extraction
+
+`TypeMapper` extracts `enum` values from `CodeList` and `AgencyIdList` restrictions
+via `BDT_PRI_RESTRI` → `CODE_LIST_VALUE` / `AGENCY_ID_LIST_VALUE`. These are
+injected as `enum` arrays in the generated schema properties.
+
+Resolution chain: `BCCP.bdtId` → `BDT_PRI_RESTRI` (scan all) → `TypeResolution`
+(with enums from `CodeListValue`/`AgencyIdListValue`).
+
+### Security
+
+The generator emits a global `security` block referencing a `bearerAuth` scheme
+declared under `components/securitySchemes`. This is a placeholder — downstream
+overlays should replace it with the actual authentication mechanism.
 
 ## Code Style
 
@@ -50,39 +93,13 @@ Edit `OpenApiSchemaBuilder.buildPaths()` to modify the REST endpoint structure.
 - Javadoc on all public methods
 - No Lombok (project convention)
 
-## Testing
+## Linting Configuration
 
-### Quick Validation
-
-```bash
-# Generate + lint in one shot
-$JAVA_HOME/bin/java -cp "$CLASSPATH" \
-  -Dspring.profiles.active=generate-openapi \
-  -Dspring.datasource.url="jdbc:mysql://127.0.0.1:3306/oagi?useSSL=false&allowPublicKeyRetrieval=true" \
-  -Dspring.datasource.username=oagi -Dspring.datasource.password=oagi \
-  -Dspring.datasource.driver-class-name=com.mysql.jdbc.Driver \
-  -Dspring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL5InnoDBDialect \
-  org.oagi.srt.openapi.OpenApiApplication
-
-npx -y @redocly/cli@latest lint openapi-output/PurchaseOrder.openapi.yaml \
-  --skip-rule info-license --skip-rule no-unused-components
-```
-
-**Acceptance criteria:** 0 lint errors.
-
-### Visual Verification
-
-```bash
-npx -y @redocly/cli@latest build-docs \
-  openapi-output/PurchaseOrder.openapi.yaml \
-  -o /tmp/purchase-order-docs.html
-open /tmp/purchase-order-docs.html
-```
-
-Verify that schemas render correctly and the inheritance tree is navigable.
+See `redocly.yaml` at the project root. The only suppressed operational rule is
+`no-server-example.com` because the spec uses a placeholder URL by design.
 
 ## Known Limitations
 
 - **No array-level composition** — BCCs with `maxOccurs="unbounded"` use `type: array` with `items.$ref` but no individual item descriptions
-- **Code list values** — BCCs restricted to a code list emit `type: string` without `enum` values (enums are not yet extracted from the DB)
 - **Single-noun generation** — each run produces one YAML per ASCCP; batch generation is not yet implemented
+- **`srt-webapp` dependency** — full regeneration requires the `srt-webapp` module, which has stale PrimeFaces dependencies. We bypass this by compiling only `srt-openapi`
