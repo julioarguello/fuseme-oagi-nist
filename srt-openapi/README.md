@@ -8,6 +8,7 @@ Generates [OpenAPI 3.0.3](https://spec.openapis.org/oas/v3.0.3) schemas from OAG
 - **`allOf` composition** — ACC inheritance via `based_acc_id` emitted as `allOf` references
 - **Alias detection** — identical ACCs referenced under different ASCCP names produce thin `allOf` wrappers instead of duplicate schemas
 - **XSD-to-OpenAPI type mapping** — 30+ XSD built-in types resolved through the BDT → CDT → XBT chain
+- **Enum generation** — automatic `enum` arrays from `CodeList` and `AgencyIdList` restrictions for maximum model fidelity
 - **CRUD-style paths** — auto-generated REST endpoints referencing the root schema for documentation renderers (Redocly, Swagger UI)
 
 ---
@@ -149,7 +150,8 @@ srt-openapi/
 | `CcOpenApiGenerator`       | Orchestrates walk → build → YAML serialization pipeline                   |
 | `CcTreeWalker`             | Walks ASCCP → ACC → (BCC + ASCC children); detects aliases and cycles     |
 | `OpenApiSchemaBuilder`     | Converts `TreeResult` into OpenAPI doc with `allOf` composition and paths |
-| `TypeMapper`               | Resolves BDT → CDT → XBT chain to OpenAPI `type`/`format` pairs          |
+| `TypeMapper`               | Resolves BDT → CDT → XBT chain to `TypeResolution` (type/format/enum)    |
+| `TypeResolution`           | Immutable value object carrying OAS type, format, and optional enum values|
 
 ### CC Tree Traversal (CcTreeWalker)
 
@@ -163,16 +165,158 @@ srt-openapi/
 4. **Cycle detection**: tracks `accId` → first schema name. Subsequent references to the same ACC under a different ASCCP name are recorded as **aliases** (`aliasMap`)
 5. **Inheritance**: if an ACC has a `basedAccId`, the relationship is recorded in `baseSchemaMap`
 
-### Type Resolution (TypeMapper)
+### Type Resolution (TypeMapper → TypeResolution)
 
 ```
-bdtId → BDT_PRI_RESTRI (default) → CDT_AWD_PRI_XPS_TYPE_MAP → XBT.builtInType
-                                                                     ↓
-                                                         XSD_TO_OPENAPI table
-                                                         (xsd:decimal → number/double)
+bdtId → BDT_PRI_RESTRI (default)
+  ├─ codeListId > 0       → string + enum[] from CodeListValue.getValue()
+  ├─ agencyIdListId > 0   → string + enum[] from AgencyIdListValue.getValue()
+  └─ cdtAwdPriXpsTypeMapId → CDT_AWD_PRI_XPS_TYPE_MAP → XBT.builtInType
+                                                              ↓
+                                                   XSD_TO_OPENAPI table
+                                                   (xsd:decimal → number)
 ```
 
-Covers 30+ XSD types including numerics, dates, binary, URI, and string variants.
+See [Type Mapping Reference](#type-mapping-reference) and [Enum Generation](#enum-generation) for details.
+
+---
+
+## Type Mapping Reference
+
+The generator resolves OAGIS data types to OpenAPI `type`/`format` pairs through a multi-table chain defined by the NIST Core Component specification.
+
+### Resolution Chain
+
+```
+BCCP.bdtId
+  → BDT_PRI_RESTRI (isDefault=true)
+    → CDT_AWD_PRI_XPS_TYPE_MAP
+      → XBT.builtInType
+        → XSD_TO_OPENAPI (hardcoded in TypeMapper.java)
+```
+
+**Source of truth**: `P_1_2_PopulateCDTandCDTSC.java` populates the CDT → CDT Primitive → XBT Expression Type Map relationships during database import.
+
+### CDT Default Primitives (from NIST import)
+
+Each Core Data Type has a single **default** CDT Primitive that determines its canonical XSD expression type:
+
+| CDT          | Default Primitive | XBT Expression    | OAS type   | OAS format  |
+|:-------------|:------------------|:-------------------|:-----------|:------------|
+| Amount       | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Measure      | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Quantity     | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Number       | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Percent      | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Rate         | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Ratio        | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Value        | Decimal           | `xsd:decimal`      | `number`   | —           |
+| Ordinal      | Integer           | `xsd:integer`      | `integer`  | `int64`     |
+| Indicator    | Boolean           | `xbt_BooleanType`  | `boolean`  | —           |
+| Code         | Token             | `xsd:token`        | `string`   | —           |
+| Identifier   | Token             | `xsd:token`        | `string`   | —           |
+| Name         | Token             | `xsd:token`        | `string`   | —           |
+| Text         | String            | `xsd:string`       | `string`   | —           |
+| Date         | TimePoint         | `xsd:date`         | `string`   | `date`      |
+| Date Time    | TimePoint         | `xsd:dateTime`     | `string`   | `date-time` |
+| Time         | TimePoint         | `xsd:time`         | `string`   | `time`      |
+| Duration     | TimeDuration      | `xsd:duration`     | `string`   | `duration`  |
+| Binary Object| Binary            | `xsd:base64Binary` | `string`   | `byte`      |
+
+### XSD → OpenAPI Mapping Table
+
+| XSD Built-in Type       | OAS `type`  | OAS `format`   | Rationale |
+|:------------------------|:------------|:---------------|:----------|
+| `xsd:integer`           | `integer`   | `int64`        | Arbitrary-precision integer; `int64` covers all practical OAGIS values |
+| `xsd:nonNegativeInteger`| `integer`   | `int64`        | Same as integer with ≥ 0 constraint (enforce via `minimum: 0`) |
+| `xsd:positiveInteger`   | `integer`   | `int64`        | Same with > 0 constraint (enforce via `minimum: 1, exclusiveMinimum: true`) |
+| `xsd:decimal`           | `number`    | —              | **Arbitrary-precision decimal**; no format = unconstrained per OAS spec |
+| `xsd:double`            | `number`    | `double`       | IEEE 754 64-bit floating point |
+| `xsd:float`             | `number`    | `float`        | IEEE 754 32-bit floating point |
+| `xsd:boolean`           | `boolean`   | —              | Direct mapping |
+| `xsd:date`              | `string`    | `date`         | RFC 3339 `full-date` |
+| `xsd:dateTime`          | `string`    | `date-time`    | RFC 3339 `date-time` |
+| `xsd:time`              | `string`    | `time`         | `HH:MM:SS` (no OAS standard; custom format) |
+| `xsd:duration`          | `string`    | `duration`     | ISO 8601 duration (custom format) |
+| `xsd:base64Binary`      | `string`    | `byte`         | OAS standard for base64-encoded content |
+| `xsd:string`            | `string`    | —              | Direct mapping |
+| `xsd:token`             | `string`    | —              | Whitespace-normalized string |
+| `xsd:normalizedString`  | `string`    | —              | Single-line string |
+
+### Key Design Decision: `xsd:decimal` → `number` (no format)
+
+`xsd:decimal` represents arbitrary-precision decimal numbers (analogous to Java's `BigDecimal`). The NIST import code (`Utility.checkCorrespondingTypes()`) explicitly treats `Decimal` and `Double` as distinct CDT Primitives.
+
+In OpenAPI 3.0:
+- `type: number, format: double` = IEEE 754 64-bit (~15 significant digits)
+- `type: number, format: float` = IEEE 754 32-bit (~7 significant digits)
+- `type: number` (no format) = **unconstrained numeric precision**
+
+Since Amount, Measure, Quantity, and other financial types default to `Decimal` → `xsd:decimal`, constraining to `double` would lose precision for values like `12345678901234.99`. Using `number` without format preserves the semantic intent of the OAGIS specification.
+
+---
+
+## Enum Generation
+
+When a BDT's default restriction references a **CodeList** or **AgencyIdList** (rather than a CDT Primitive), the generator extracts all allowed values and emits them as OpenAPI `enum` arrays.
+
+### Resolution Chain
+
+```
+bdtId → BDT_PRI_RESTRI (default)
+  ├─ codeListId > 0
+  │    → CodeList (name for traceability)
+  │    → CodeListValue[] → .getValue() → enum: ["USD", "EUR", ...]
+  │
+  └─ agencyIdListId > 0
+       → AgencyIdList (name for traceability)
+       → AgencyIdListValue[] → .getValue() → enum: ["6", "16", ...]
+```
+
+### Implementation
+
+| Class            | Responsibility |
+|:-----------------|:---------------|
+| `TypeMapper`     | Detects code list restrictions in `BDT_PRI_RESTRI`, fetches values via `ImportedDataProvider` |
+| `TypeResolution`  | Carries `type`, `format`, `enumValues` (nullable), and `enumSource` (traceability string) |
+| `OpenApiSchemaBuilder` | Injects `enum` array into property schema when `TypeResolution.hasEnum()` is true |
+
+### Example Output
+
+A field constrained by the OAGIS Currency Code List would generate:
+
+```yaml
+currencyCode:
+  type: string
+  enum:
+    - AED
+    - AFN
+    - ALL
+    - AMD
+    - ANG
+    # ... (all ISO 4217 codes)
+    - ZMW
+    - ZWL
+```
+
+An agency identification field would generate:
+
+```yaml
+agencyIdentification:
+  type: string
+  enum:
+    - "1"    # UN/ECE
+    - "2"    # CEN/ISSS
+    - "6"    # UN/CEFACT
+    - "16"   # DUNS
+    # ... (all registered agency codes)
+```
+
+### Design Rationale
+
+- **Enum at the type level, not the property level**: The allowed values are a property of the data type (BDT), not the individual BCCP. Every field referencing the same BDT gets the same enum constraint.
+- **Maximum model fidelity**: Enums enable client-side validation, IDE autocompletion, and documentation tooling (Redocly, Swagger UI) to display allowed values without external reference lookups.
+- **Source traceability**: `TypeResolution.enumSource` preserves the origin (e.g., `"CodeList: oacl_CurrencyCode"`) for debugging and auditing.
 
 ---
 
