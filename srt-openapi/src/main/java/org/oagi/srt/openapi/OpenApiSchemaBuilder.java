@@ -306,6 +306,14 @@ public class OpenApiSchemaBuilder {
 		}
 	}
 
+	/**
+	 * Build a primitive (BCC) property schema, injecting {@code enum} arrays when the
+	 * underlying BDT is constrained by a {@link org.oagi.srt.repository.entity.CodeList}
+	 * or {@link org.oagi.srt.repository.entity.AgencyIdList}.
+	 *
+	 * @see TypeMapper#resolve(long)
+	 * @see TypeResolution#hasEnum()
+	 */
 	private Map<String, Object> buildPrimitiveProperty(CcNode node) {
 		Map<String, Object> prop = new LinkedHashMap<>();
 		boolean isArray = node.getCardinalityMax() == -1 || node.getCardinalityMax() > 1;
@@ -322,10 +330,13 @@ public class OpenApiSchemaBuilder {
 				prop.put("minItems", node.getCardinalityMin());
 			}
 		} else {
-			String[] typeFormat = typeMapper.resolve(node.getBdtId());
-			prop.put("type", typeFormat[0]);
-			if (typeFormat[1] != null) {
-				prop.put("format", typeFormat[1]);
+			TypeResolution resolution = typeMapper.resolve(node.getBdtId());
+			prop.put("type", resolution.getType());
+			if (resolution.getFormat() != null) {
+				prop.put("format", resolution.getFormat());
+			}
+			if (resolution.hasEnum()) {
+				prop.put("enum", resolution.getEnumValues());
 			}
 		}
 
@@ -376,12 +387,21 @@ public class OpenApiSchemaBuilder {
 		return prop;
 	}
 
+	/**
+	 * Resolves a BDT to an OpenAPI type map for use in array {@code items}.
+	 * Includes {@code enum} when the BDT is constrained by a code list.
+	 *
+	 * @see TypeMapper#resolve(long)
+	 */
 	private Map<String, Object> resolveType(long bdtId) {
 		Map<String, Object> type = new LinkedHashMap<>();
-		String[] typeFormat = typeMapper.resolve(bdtId);
-		type.put("type", typeFormat[0]);
-		if (typeFormat[1] != null) {
-			type.put("format", typeFormat[1]);
+		TypeResolution resolution = typeMapper.resolve(bdtId);
+		type.put("type", resolution.getType());
+		if (resolution.getFormat() != null) {
+			type.put("format", resolution.getFormat());
+		}
+		if (resolution.hasEnum()) {
+			type.put("enum", resolution.getEnumValues());
 		}
 		return type;
 	}
