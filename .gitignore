@@ -30,4 +30,5 @@ json-schema/
 xsd2js-test/
 backup-oagis-10.3.sql
 scripts/
-xsd/
+xsd/openapi-output/
+Libraries/

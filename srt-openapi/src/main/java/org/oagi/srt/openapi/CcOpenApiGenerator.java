@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
+import org.oagi.srt.openapi.CcTreeWalker.SuperTreeResult;
 import org.oagi.srt.openapi.CcTreeWalker.TreeResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,12 +57,35 @@ public class CcOpenApiGenerator {
 		Map<String, Object> openApiDoc = openApiSchemaBuilder.build(
 				treeResult, asccpPropertyTerm + " API", treeResult.getRootSchemaName());
 
-		// Write to YAML
+		return writeYaml(openApiDoc, outputDir, treeResult.getRootSchemaName() + ".openapi.yaml");
+	}
+
+	/**
+	 * Generate a super-schema covering ALL root OAGIS nouns in one YAML file.
+	 *
+	 * @param outputDir  directory to write the YAML file to
+	 * @return the generated File
+	 */
+	public File generateSuper(File outputDir) throws IOException {
+		logger.info("=== Generating OAGIS Super Schema ===");
+
+		SuperTreeResult superResult = ccTreeWalker.walkAll();
+		logger.info("Super walk complete: {} roots, {} schemas, {} aliases",
+				superResult.getRootSchemaNames().size(),
+				superResult.getSchemas().size(),
+				superResult.getAliasMap().size());
+
+		Map<String, Object> openApiDoc = openApiSchemaBuilder.buildSuper(
+				superResult, "OAGIS Core Components — Super Schema");
+
+		return writeYaml(openApiDoc, outputDir, "oagis-super-schema.openapi.yaml");
+	}
+
+	private File writeYaml(Map<String, Object> doc, File outputDir, String fileName) throws IOException {
 		if (!outputDir.exists()) {
 			outputDir.mkdirs();
 		}
 
-		String fileName = treeResult.getRootSchemaName() + ".openapi.yaml";
 		File outputFile = new File(outputDir, fileName);
 
 		YAMLFactory yamlFactory = new YAMLFactory()
@@ -70,7 +94,7 @@ public class CcOpenApiGenerator {
 
 		ObjectMapper yamlMapper = new ObjectMapper(yamlFactory);
 		yamlMapper.enable(SerializationFeature.INDENT_OUTPUT);
-		yamlMapper.writeValue(outputFile, openApiDoc);
+		yamlMapper.writeValue(outputFile, doc);
 
 		logger.info("OpenAPI spec written to: {}", outputFile.getAbsolutePath());
 		return outputFile;

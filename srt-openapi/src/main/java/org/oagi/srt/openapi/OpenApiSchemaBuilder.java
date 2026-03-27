@@ -1,6 +1,7 @@
 package org.oagi.srt.openapi;
 
 import org.oagi.srt.openapi.CcTreeWalker.CcNode;
+import org.oagi.srt.openapi.CcTreeWalker.SuperTreeResult;
 import org.oagi.srt.openapi.CcTreeWalker.TreeResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -44,13 +45,66 @@ public class OpenApiSchemaBuilder {
 		doc.put("servers", servers);
 
 		// Generate paths referencing the root schema so renderers (Redocly) display it
-		doc.put("paths", buildPaths(rootSchemaName));
+		doc.put("paths", buildPaths(Collections.singletonList(rootSchemaName)));
 
+		doc.put("components", buildComponents(treeResult.getSchemas(),
+				treeResult.getBaseSchemaMap(), treeResult.getAliasMap()));
+
+		return doc;
+	}
+
+	/**
+	 * Build a super-schema OpenAPI 3.0.3 document from all root nouns.
+	 */
+	public Map<String, Object> buildSuper(SuperTreeResult superResult, String title) {
+		Map<String, Object> doc = new LinkedHashMap<>();
+		doc.put("openapi", "3.0.3");
+
+		Map<String, Object> info = new LinkedHashMap<>();
+		info.put("title", title);
+		info.put("version", "1.0.0");
+		info.put("description",
+				"Canonical super-schema containing all OAGIS Core Components. " +
+				"Use OpenAPI Overlays to create domain-specific API subsets.");
+		doc.put("info", info);
+
+		List<Map<String, Object>> servers = new ArrayList<>();
+		Map<String, Object> server = new LinkedHashMap<>();
+		server.put("url", "https://api.example.com/v1");
+		server.put("description", "Placeholder server");
+		servers.add(server);
+		doc.put("servers", servers);
+
+		// Tags: one per root noun for overlay discoverability
+		List<Map<String, Object>> tags = new ArrayList<>();
+		for (String rootName : superResult.getRootSchemaNames()) {
+			Map<String, Object> tag = new LinkedHashMap<>();
+			tag.put("name", rootName);
+			tag.put("description", rootName + " business document operations");
+			tags.add(tag);
+		}
+		doc.put("tags", tags);
+
+		// Build paths for all roots
+		doc.put("paths", buildPaths(superResult.getRootSchemaNames()));
+
+		doc.put("components", buildComponents(superResult.getSchemas(),
+				superResult.getBaseSchemaMap(), superResult.getAliasMap()));
+
+		return doc;
+	}
+
+	/**
+	 * Build the components section from schemas, base map, and aliases.
+	 */
+	private Map<String, Object> buildComponents(
+			Map<String, List<CcNode>> schemaNodes,
+			Map<String, String> baseMap,
+			Map<String, String> aliasMapData) {
 		Map<String, Object> components = new LinkedHashMap<>();
 		Map<String, Object> schemas = new LinkedHashMap<>();
-		Map<String, String> baseMap = treeResult.getBaseSchemaMap();
 
-		for (Map.Entry<String, List<CcNode>> entry : treeResult.getSchemas().entrySet()) {
+		for (Map.Entry<String, List<CcNode>> entry : schemaNodes.entrySet()) {
 			String schemaName = entry.getKey();
 			List<CcNode> nodes = entry.getValue();
 			String baseName = baseMap.get(schemaName);
@@ -58,7 +112,7 @@ public class OpenApiSchemaBuilder {
 		}
 
 		// Generate alias schemas for ACCs referenced under multiple names
-		for (Map.Entry<String, String> alias : treeResult.getAliasMap().entrySet()) {
+		for (Map.Entry<String, String> alias : aliasMapData.entrySet()) {
 			Map<String, Object> aliasSchema = new LinkedHashMap<>();
 			List<Object> allOfList = new ArrayList<>();
 			Map<String, Object> ref = new LinkedHashMap<>();
@@ -69,46 +123,48 @@ public class OpenApiSchemaBuilder {
 		}
 
 		components.put("schemas", schemas);
-		doc.put("components", components);
-
-		return doc;
+		return components;
 	}
 
 	/**
-	 * Build CRUD-style paths referencing the root schema.
+	 * Build CRUD-style paths for one or more root schemas.
 	 */
-	private Map<String, Object> buildPaths(String rootSchemaName) {
+	private Map<String, Object> buildPaths(List<String> rootSchemaNames) {
 		Map<String, Object> paths = new LinkedHashMap<>();
-		String ref = "#/components/schemas/" + rootSchemaName;
 
-		// Convert PascalCase to kebab-case for the path
-		String pathSegment = rootSchemaName
-				.replaceAll("([a-z])([A-Z])", "$1-$2")
-				.toLowerCase();
+		for (String rootSchemaName : rootSchemaNames) {
+			String ref = "#/components/schemas/" + rootSchemaName;
 
-		// Collection endpoint
-		Map<String, Object> collectionOps = new LinkedHashMap<>();
-		collectionOps.put("get", buildOperation(
-				"List " + rootSchemaName + " resources",
-				"200", "array", ref));
-		collectionOps.put("post", buildOperation(
-				"Create a " + rootSchemaName,
-				"201", null, ref));
-		paths.put("/" + pathSegment, collectionOps);
+			// Convert PascalCase to kebab-case for the path
+			String pathSegment = rootSchemaName
+					.replaceAll("([a-z])([A-Z])", "$1-$2")
+					.toLowerCase();
 
-		// Item endpoint
-		Map<String, Object> itemOps = new LinkedHashMap<>();
-		itemOps.put("get", buildItemOperation(
-				"Get a " + rootSchemaName + " by ID", ref));
-		paths.put("/" + pathSegment + "/{id}", itemOps);
+			// Collection endpoint
+			Map<String, Object> collectionOps = new LinkedHashMap<>();
+			collectionOps.put("get", buildOperation(
+					"List " + rootSchemaName + " resources",
+					"200", "array", ref, rootSchemaName));
+			collectionOps.put("post", buildOperation(
+					"Create a " + rootSchemaName,
+					"201", null, ref, rootSchemaName));
+			paths.put("/" + pathSegment, collectionOps);
+
+			// Item endpoint
+			Map<String, Object> itemOps = new LinkedHashMap<>();
+			itemOps.put("get", buildItemOperation(
+					"Get a " + rootSchemaName + " by ID", ref, rootSchemaName));
+			paths.put("/" + pathSegment + "/{id}", itemOps);
+		}
 
 		return paths;
 	}
 
 	private Map<String, Object> buildOperation(
-			String summary, String statusCode, String wrapType, String ref) {
+			String summary, String statusCode, String wrapType, String ref, String tag) {
 		Map<String, Object> op = new LinkedHashMap<>();
 		op.put("summary", summary);
+		op.put("tags", Collections.singletonList(tag));
 
 		// Request body for POST
 		if ("201".equals(statusCode)) {
@@ -148,9 +204,10 @@ public class OpenApiSchemaBuilder {
 		return op;
 	}
 
-	private Map<String, Object> buildItemOperation(String summary, String ref) {
+	private Map<String, Object> buildItemOperation(String summary, String ref, String tag) {
 		Map<String, Object> op = new LinkedHashMap<>();
 		op.put("summary", summary);
+		op.put("tags", Collections.singletonList(tag));
 
 		List<Map<String, Object>> params = new ArrayList<>();
 		Map<String, Object> idParam = new LinkedHashMap<>();
