@@ -119,6 +119,36 @@ public class CcTreeWalker {
 	/**
 	 * Mutable context accumulated during a tree walk. Encapsulates all the maps
 	 * and sets that were previously separate method parameters.
+	 *
+	 * <h3>Excluded fields policy</h3>
+	 * <p>The following entity fields are intentionally excluded from the walk context
+	 * and do not appear in the OpenAPI output:</p>
+	 * <ul>
+	 *   <li><b>Audit/lifecycle</b> ({@code createdBy}, {@code ownerUserId}, {@code lastUpdatedBy},
+	 *       {@code creationTimestamp}, {@code lastUpdateTimestamp}, {@code state}) — internal
+	 *       Score CMS authoring metadata with no consumer-facing semantics.</li>
+	 *   <li><b>Revision tracking</b> ({@code revisionNum}, {@code revisionTrackingNum},
+	 *       {@code revisionAction}, {@code releaseId}, {@code currentXxxId}) — internal
+	 *       change management; {@code DataType.versionNum} covers external versioning.</li>
+	 *   <li><b>Surrogate PKs</b> ({@code accId}, {@code bccId}, etc.) — database-only;
+	 *       OAGIS {@code guid} serves as the portable identifier ({@code x-guid}).</li>
+	 *   <li><b>FK join columns</b> ({@code fromAccId}, {@code toBccpId}, {@code roleOfAccId},
+	 *       etc.) — consumed during traversal; the resulting schema structure captures
+	 *       the same relationships via {@code $ref} and {@code allOf}.</li>
+	 *   <li><b>Redundant association-entity fields</b> ({@code BCC.guid}, {@code ASCC.guid},
+	 *       {@code BCC.den}, {@code ASCC.den}) — BCCP/ASCCP GUIDs and DENs are the
+	 *       canonical identifiers emitted on properties.</li>
+	 *   <li><b>ACC internal classification</b> ({@code ACC.oagisComponentType}) — OAGIS
+	 *       ontology discriminator (Base, Semantics, Extension, etc.); schema-level
+	 *       {@code x-component-type: ACC} already identifies the component kind.</li>
+	 *   <li><b>Module/namespace at property level</b> — emitted at ACC (schema) level;
+	 *       properties inherit from their containing schema.</li>
+	 *   <li><b>Property-template fields shadowed by association context</b>
+	 *       ({@code BCCP.nillable}, {@code BCCP.defaultValue}, {@code ASCCP.nillable}) —
+	 *       BCC-level overrides take precedence per CCTS semantics.</li>
+	 * </ul>
+	 *
+	 * @see <a href="../../../../../../README.md">README.md § Excluded Fields</a>
 	 */
 	private static class WalkContext {
 		final Map<String, List<CcNode>> schemas = new LinkedHashMap<>();
@@ -538,7 +568,7 @@ public class CcTreeWalker {
 		for (String word : term.split("\\s+")) {
 			if (!word.isEmpty()) {
 				if ("Identifier".equals(word)) {
-					sb.append("ID");
+					sb.append("Id");
 				} else {
 					sb.append(Character.toUpperCase(word.charAt(0)));
 					if (word.length() > 1) {

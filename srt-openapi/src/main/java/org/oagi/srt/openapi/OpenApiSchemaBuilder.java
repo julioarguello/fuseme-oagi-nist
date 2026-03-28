@@ -13,9 +13,20 @@ import java.util.*;
  * Converts the CcTreeWalker output into an OpenAPI 3.1.0 schema structure
  * represented as nested Maps (ready for YAML/JSON serialization).
  *
- * Uses allOf composition for ACC inheritance (based_acc_id). In OAS 3.1.0,
+ * <p>Uses allOf composition for ACC inheritance (based_acc_id). In OAS 3.1.0,
  * $ref can coexist with sibling keywords like description, so no allOf
- * wrapper is needed for association properties.
+ * wrapper is needed for association properties.</p>
+ *
+ * <h3>Field exclusion policy</h3>
+ * <p>Approximately 60 entity fields across ACC, BCC, BCCP, ASCC, ASCCP, and DataType
+ * are intentionally excluded from the OpenAPI output. These fall into categories such as
+ * internal audit/lifecycle metadata, revision tracking, surrogate primary keys, FK join
+ * columns, redundant GUIDs, CC-level definition sources, DataType internals, and
+ * module/namespace at the property level. All exclusions have been audited for semantic
+ * relevance and documented with justifications.</p>
+ *
+ * @see CcTreeWalker.WalkContext WalkContext (excluded fields list)
+ * @see <a href="../../../../../../README.md">README.md § Excluded Fields</a>
  */
 @Component
 @Lazy
@@ -26,51 +37,41 @@ public class OpenApiSchemaBuilder {
 
 	/**
 	 * Build a complete OpenAPI 3.1.0 document from a tree walk result.
+	 *
+	 * @param releaseNum OAGIS release version (e.g., "10.3") used as {@code info.version}
 	 */
-	public Map<String, Object> build(TreeResult treeResult, String title, String rootSchemaName) {
+	public Map<String, Object> build(TreeResult treeResult, String title,
+									  String releaseNum) {
 		Map<String, Object> doc = new LinkedHashMap<>();
 		doc.put("openapi", "3.1.0");
 
 		Map<String, Object> info = new LinkedHashMap<>();
 		info.put("title", title);
-		info.put("version", "1.0.0");
-		info.put("description", "OpenAPI schemas generated from OAGIS Core Components");
+		info.put("version", releaseNum);
+		info.put("description", "OpenAPI schemas generated from OAGIS Core Components. " +
+				"Use OpenAPI Overlays to create domain-specific API subsets.");
 		info.put("contact", buildInfoContact());
 		info.put("license", buildInfoLicense());
 		doc.put("info", info);
 
-		// Servers placeholder
-		List<Map<String, Object>> servers = new ArrayList<>();
-		Map<String, Object> server = new LinkedHashMap<>();
-		server.put("url", "https://api.example.com/v1");
-		server.put("description", "Placeholder server");
-		servers.add(server);
-		doc.put("servers", servers);
-
-		// Global security - reference the scheme declared in components
-		doc.put("security", Collections.singletonList(
-				Collections.singletonMap("bearerAuth", Collections.emptyList())));
-
-		// Generate paths referencing the root schema so renderers (Redocly) display it
-		doc.put("paths", buildPaths(Collections.singletonList(rootSchemaName)));
-
-		Map<String, Object> components = buildComponentsFromTree(treeResult);
-		addSecuritySchemes(components);
-		doc.put("components", components);
+		doc.put("components", buildComponentsFromTree(treeResult));
 
 		return doc;
 	}
 
 	/**
 	 * Build a super-schema OpenAPI 3.1.0 document from all root nouns.
+	 *
+	 * @param releaseNum OAGIS release version (e.g., "10.3") used as {@code info.version}
 	 */
-	public Map<String, Object> buildSuper(SuperTreeResult superResult, String title) {
+	public Map<String, Object> buildSuper(SuperTreeResult superResult, String title,
+										  String releaseNum) {
 		Map<String, Object> doc = new LinkedHashMap<>();
 		doc.put("openapi", "3.1.0");
 
 		Map<String, Object> info = new LinkedHashMap<>();
 		info.put("title", title);
-		info.put("version", "1.0.0");
+		info.put("version", releaseNum);
 		info.put("description",
 				"Canonical super-schema containing all OAGIS Core Components. " +
 				"Use OpenAPI Overlays to create domain-specific API subsets.");
@@ -78,33 +79,7 @@ public class OpenApiSchemaBuilder {
 		info.put("license", buildInfoLicense());
 		doc.put("info", info);
 
-		List<Map<String, Object>> servers = new ArrayList<>();
-		Map<String, Object> server = new LinkedHashMap<>();
-		server.put("url", "https://api.example.com/v1");
-		server.put("description", "Placeholder server");
-		servers.add(server);
-		doc.put("servers", servers);
-
-		// Tags: one per root noun for overlay discoverability
-		List<Map<String, Object>> tags = new ArrayList<>();
-		for (String rootName : superResult.getRootSchemaNames()) {
-			Map<String, Object> tag = new LinkedHashMap<>();
-			tag.put("name", rootName);
-			tag.put("description", rootName + " business document operations");
-			tags.add(tag);
-		}
-		doc.put("tags", tags);
-
-		// Global security - reference the scheme declared in components
-		doc.put("security", Collections.singletonList(
-				Collections.singletonMap("bearerAuth", Collections.emptyList())));
-
-		// Build paths for all roots
-		doc.put("paths", buildPaths(superResult.getRootSchemaNames()));
-
-		Map<String, Object> components = buildComponentsFromSuper(superResult);
-		addSecuritySchemes(components);
-		doc.put("components", components);
+		doc.put("components", buildComponentsFromSuper(superResult));
 
 		return doc;
 	}
@@ -192,208 +167,8 @@ public class OpenApiSchemaBuilder {
 			schemas.put(alias.getKey(), aliasSchema);
 		}
 
-		// Reusable error response schema
-		schemas.put("ErrorResponse", buildErrorResponseSchema());
-
 		components.put("schemas", schemas);
 		return components;
-	}
-
-	/**
-	 * Add OAuth2/Bearer security scheme to the components section.
-	 * Prevents Redocly {@code security-defined} errors by declaring the
-	 * scheme referenced by the global {@code security} block.
-	 */
-	private void addSecuritySchemes(Map<String, Object> components) {
-		Map<String, Object> securitySchemes = new LinkedHashMap<>();
-		Map<String, Object> bearer = new LinkedHashMap<>();
-		bearer.put("type", "http");
-		bearer.put("scheme", "bearer");
-		bearer.put("bearerFormat", "JWT");
-		bearer.put("description", "JWT token for API authentication");
-		securitySchemes.put("bearerAuth", bearer);
-		components.put("securitySchemes", securitySchemes);
-	}
-
-	/**
-	 * Build CRUD-style paths for one or more root schemas.
-	 */
-	private Map<String, Object> buildPaths(List<String> rootSchemaNames) {
-		Map<String, Object> paths = new LinkedHashMap<>();
-
-		for (String rootSchemaName : rootSchemaNames) {
-			String ref = "#/components/schemas/" + rootSchemaName;
-
-			// Convert PascalCase to kebab-case for the path
-			String pathSegment = rootSchemaName
-					.replaceAll("([a-z])([A-Z])", "$1-$2")
-					.toLowerCase();
-
-			// Collection endpoint
-			Map<String, Object> collectionOps = new LinkedHashMap<>();
-			collectionOps.put("get", buildListOperation(rootSchemaName, ref));
-			collectionOps.put("post", buildCreateOperation(rootSchemaName, ref));
-			paths.put("/" + pathSegment, collectionOps);
-
-			// Item endpoint
-			Map<String, Object> itemOps = new LinkedHashMap<>();
-			itemOps.put("get", buildGetOperation(rootSchemaName, ref));
-			paths.put("/" + pathSegment + "/{id}", itemOps);
-		}
-
-		return paths;
-	}
-
-	/**
-	 * Build a GET (list) operation with {@code operationId} and a 200 array response.
-	 */
-	private Map<String, Object> buildListOperation(String schemaName, String ref) {
-		Map<String, Object> op = new LinkedHashMap<>();
-		op.put("operationId", "list" + schemaName);
-		op.put("summary", "List " + schemaName + " resources");
-		op.put("tags", Collections.singletonList(schemaName));
-
-		Map<String, Object> responses = new LinkedHashMap<>();
-
-		// 200 - array of resources
-		Map<String, Object> okResp = new LinkedHashMap<>();
-		okResp.put("description", "Successful response");
-		Map<String, Object> schema = new LinkedHashMap<>();
-		schema.put("type", "array");
-		Map<String, Object> items = new LinkedHashMap<>();
-		items.put("$ref", ref);
-		schema.put("items", items);
-		okResp.put("content", jsonContent(schema));
-		responses.put("200", okResp);
-
-		// 400 - bad request
-		responses.put("400", errorResponse("Bad request"));
-
-		op.put("responses", responses);
-		return op;
-	}
-
-	/**
-	 * Build a POST (create) operation with {@code operationId}, request body,
-	 * and 201/400 responses.
-	 */
-	private Map<String, Object> buildCreateOperation(String schemaName, String ref) {
-		Map<String, Object> op = new LinkedHashMap<>();
-		op.put("operationId", "create" + schemaName);
-		op.put("summary", "Create a " + schemaName);
-		op.put("tags", Collections.singletonList(schemaName));
-
-		// Request body
-		Map<String, Object> reqBody = new LinkedHashMap<>();
-		reqBody.put("required", true);
-		Map<String, Object> schemaRef = new LinkedHashMap<>();
-		schemaRef.put("$ref", ref);
-		reqBody.put("content", jsonContent(schemaRef));
-		op.put("requestBody", reqBody);
-
-		Map<String, Object> responses = new LinkedHashMap<>();
-
-		// 201 - created
-		Map<String, Object> createdResp = new LinkedHashMap<>();
-		createdResp.put("description", "Resource created");
-		Map<String, Object> respRef = new LinkedHashMap<>();
-		respRef.put("$ref", ref);
-		createdResp.put("content", jsonContent(respRef));
-		responses.put("201", createdResp);
-
-		// 400 - bad request
-		responses.put("400", errorResponse("Bad request"));
-
-		op.put("responses", responses);
-		return op;
-	}
-
-	/**
-	 * Build a GET-by-ID (item) operation with {@code operationId}, path parameter,
-	 * and 200/404 responses.
-	 */
-	private Map<String, Object> buildGetOperation(String schemaName, String ref) {
-		Map<String, Object> op = new LinkedHashMap<>();
-		op.put("operationId", "get" + schemaName);
-		op.put("summary", "Get a " + schemaName + " by ID");
-		op.put("tags", Collections.singletonList(schemaName));
-
-		// Path parameter
-		List<Map<String, Object>> params = new ArrayList<>();
-		Map<String, Object> idParam = new LinkedHashMap<>();
-		idParam.put("name", "id");
-		idParam.put("in", "path");
-		idParam.put("required", true);
-		idParam.put("description", "Unique resource identifier");
-		Map<String, Object> idSchema = new LinkedHashMap<>();
-		idSchema.put("type", "string");
-		idParam.put("schema", idSchema);
-		params.add(idParam);
-		op.put("parameters", params);
-
-		Map<String, Object> responses = new LinkedHashMap<>();
-
-		// 200 - found
-		Map<String, Object> okResp = new LinkedHashMap<>();
-		okResp.put("description", "Successful response");
-		Map<String, Object> respRef = new LinkedHashMap<>();
-		respRef.put("$ref", ref);
-		okResp.put("content", jsonContent(respRef));
-		responses.put("200", okResp);
-
-		// 404 - not found
-		responses.put("404", errorResponse("Resource not found"));
-
-		op.put("responses", responses);
-		return op;
-	}
-
-	/** Wrap a schema map as {@code application/json} content. */
-	private Map<String, Object> jsonContent(Map<String, Object> schema) {
-		Map<String, Object> json = new LinkedHashMap<>();
-		json.put("schema", schema);
-		Map<String, Object> content = new LinkedHashMap<>();
-		content.put("application/json", json);
-		return content;
-	}
-
-	/** Build a structured error response referencing the reusable ErrorResponse schema. */
-	private Map<String, Object> errorResponse(String description) {
-		Map<String, Object> resp = new LinkedHashMap<>();
-		resp.put("description", description);
-		Map<String, Object> schemaRef = new LinkedHashMap<>();
-		schemaRef.put("$ref", "#/components/schemas/ErrorResponse");
-		resp.put("content", jsonContent(schemaRef));
-		return resp;
-	}
-
-	/** Build the reusable ErrorResponse schema with code, message, and details. */
-	private Map<String, Object> buildErrorResponseSchema() {
-		Map<String, Object> schema = new LinkedHashMap<>();
-		schema.put("type", "object");
-
-		Map<String, Object> properties = new LinkedHashMap<>();
-
-		Map<String, Object> code = new LinkedHashMap<>();
-		code.put("type", "integer");
-		code.put("format", "int32");
-		code.put("description", "HTTP status code");
-		properties.put("code", code);
-
-		Map<String, Object> message = new LinkedHashMap<>();
-		message.put("type", "string");
-		message.put("description", "Human-readable error message");
-		properties.put("message", message);
-
-		Map<String, Object> details = new LinkedHashMap<>();
-		details.put("type", "string");
-		details.put("description", "Additional diagnostic information");
-		properties.put("details", details);
-
-		schema.put("properties", properties);
-		schema.put("required", Arrays.asList("code", "message"));
-
-		return schema;
 	}
 
 	/**
@@ -424,35 +199,35 @@ public class OpenApiSchemaBuilder {
 		}
 
 		if (schemaAbstract) {
-			ownProps.put("x-abstract", true);
+			ownProps.put("x-oagis-abstract", true);
 		}
 
 		// D2: CCTS component type (always "ACC" for schema-level)
 		if (componentType != null) {
-			ownProps.put("x-component-type", componentType);
+			ownProps.put("x-oagis-component-type", componentType);
 		}
 
 		// F1: Namespace provenance
 		if (namespaceUri != null) {
-			ownProps.put("x-namespace", namespaceUri);
+			ownProps.put("x-oagis-namespace", namespaceUri);
 		}
 
 		// G2: Schema-level GUID and DEN
 		if (schemaGuid != null) {
-			ownProps.put("x-guid", schemaGuid);
+			ownProps.put("x-oagis-guid", schemaGuid);
 		}
 		if (schemaDen != null) {
-			ownProps.put("x-den", schemaDen);
+			ownProps.put("x-oagis-den", schemaDen);
 		}
 
 		// Phase 7: ACC-level qualifier
 		if (qualifier != null) {
-			ownProps.put("x-qualifier", qualifier);
+			ownProps.put("x-oagis-qualifier", qualifier);
 		}
 
 		// Phase 7: Module provenance (source XSD file)
 		if (module != null) {
-			ownProps.put("x-module", module);
+			ownProps.put("x-oagis-module", module);
 		}
 
 		// Phase 7: Namespace prefix enrichment
@@ -463,7 +238,7 @@ public class OpenApiSchemaBuilder {
 				nsObj.put("uri", namespaceUri);
 			}
 			nsObj.put("prefix", namespacePrefix);
-			ownProps.put("x-namespace", nsObj);
+			ownProps.put("x-oagis-namespace", nsObj);
 		}
 
 		if (derivedTypes.size() >= 2 && hasTypeCodeProperty(nodes)) {
@@ -599,15 +374,15 @@ public class OpenApiSchemaBuilder {
 			if (resolution.hasEnum()) {
 				prop.put("enum", resolution.getEnumValues());
 				if (resolution.getEnumSource() != null) {
-					prop.put("x-enum-source", resolution.getEnumSource());
+					prop.put("x-oagis-enum-source", resolution.getEnumSource());
 				}
 				// Per-value definitions
 				if (resolution.getEnumDescriptions() != null) {
-					prop.put("x-enum-descriptions", resolution.getEnumDescriptions());
+					prop.put("x-oagis-enum-descriptions", resolution.getEnumDescriptions());
 				}
 				// Per-value labels
 				if (resolution.getEnumLabels() != null) {
-					prop.put("x-enum-labels", resolution.getEnumLabels());
+					prop.put("x-oagis-enum-labels", resolution.getEnumLabels());
 				}
 				// Append CodeList/AgencyIdList definition to property description
 				if (resolution.getEnumSourceDescription() != null) {
@@ -615,31 +390,31 @@ public class OpenApiSchemaBuilder {
 				}
 				// C1: CodeList.remark
 				if (resolution.getEnumRemark() != null) {
-					prop.put("x-enum-remark", resolution.getEnumRemark());
+					prop.put("x-oagis-enum-remark", resolution.getEnumRemark());
 				}
 				// C2: CodeList.definitionSource
 				if (resolution.getEnumDefinitionSource() != null) {
-					prop.put("x-enum-definition-source", resolution.getEnumDefinitionSource());
+					prop.put("x-oagis-enum-definition-source", resolution.getEnumDefinitionSource());
 				}
 				// CodeList.extensibleIndicator
 				if (resolution.getEnumExtensible() != null) {
-					prop.put("x-enum-extensible", resolution.getEnumExtensible());
+					prop.put("x-oagis-enum-extensible", resolution.getEnumExtensible());
 				}
 				// Per-value CodeListValue.definitionSource
 				if (resolution.getEnumValueSources() != null) {
-					prop.put("x-enum-value-sources", resolution.getEnumValueSources());
+					prop.put("x-oagis-enum-value-sources", resolution.getEnumValueSources());
 				}
 				// External standard identifier (CodeList.listId / AgencyIdList.listId)
 				if (resolution.getEnumListId() != null) {
-					prop.put("x-enum-list-id", resolution.getEnumListId());
+					prop.put("x-oagis-enum-list-id", resolution.getEnumListId());
 				}
 				// Responsible agency (resolved from CodeList.agencyId)
 				if (resolution.getEnumAgency() != null) {
-					prop.put("x-enum-agency", resolution.getEnumAgency());
+					prop.put("x-oagis-enum-agency", resolution.getEnumAgency());
 				}
 				// Per-value extension indicators (CodeListValue.extensionIndicator)
 				if (resolution.getEnumExtensions() != null) {
-					prop.put("x-enum-extensions", resolution.getEnumExtensions());
+					prop.put("x-oagis-enum-extensions", resolution.getEnumExtensions());
 				}
 			}
 			// E1: Append DataType description as complementary paragraph
@@ -648,47 +423,47 @@ public class OpenApiSchemaBuilder {
 			}
 			// E3: DataType version
 			if (resolution.getDataTypeVersion() != null) {
-				prop.put("x-version", resolution.getDataTypeVersion());
+				prop.put("x-oagis-version", resolution.getDataTypeVersion());
 			}
 			// E: Supplementary components (DT_SC)
 			if (resolution.getSupplementaryComponents() != null) {
-				prop.put("x-supplementary-components", resolution.getSupplementaryComponents());
+				prop.put("x-oagis-supplementary-components", resolution.getSupplementaryComponents());
 			}
 			// Phase 7: DataType qualifier (CCTS qualifier for the BDT)
 			if (resolution.getDataTypeQualifier() != null) {
-				prop.put("x-qualifier", resolution.getDataTypeQualifier());
+				prop.put("x-oagis-qualifier", resolution.getDataTypeQualifier());
 			}
 			// Phase 7: Content component DEN (DT.contentComponentDen)
 			if (resolution.getContentComponentDen() != null) {
-				prop.put("x-content-component-den", resolution.getContentComponentDen());
+				prop.put("x-oagis-content-component-den", resolution.getContentComponentDen());
 			}
 			// Phase 7: Content component definition (DT.contentComponentDefinition)
 			if (resolution.getContentComponentDefinition() != null) {
-				prop.put("x-content-component-definition", resolution.getContentComponentDefinition());
+				prop.put("x-oagis-content-component-definition", resolution.getContentComponentDefinition());
 			}
 		}
 
 		// D2: Property-level component type (BCC)
 		if (node.getComponentType() != null) {
-			prop.put("x-component-type", node.getComponentType());
+			prop.put("x-oagis-component-type", node.getComponentType());
 		}
 
 		// D3: Entity type (Element vs Attribute)
 		if (node.getEntityType() != null) {
-			prop.put("x-entity-type", node.getEntityType());
+			prop.put("x-oagis-entity-type", node.getEntityType());
 		}
 
 		// D4: Representation term from BCCP
 		if (node.getRepresentationTerm() != null) {
-			prop.put("x-representation-term", node.getRepresentationTerm());
+			prop.put("x-oagis-representation-term", node.getRepresentationTerm());
 		}
 
 		// G1: Property-level GUID and DEN from BCCP
 		if (node.getGuid() != null && !node.getGuid().isEmpty()) {
-			prop.put("x-guid", node.getGuid());
+			prop.put("x-oagis-guid", node.getGuid());
 		}
 		if (node.getDen() != null && !node.getDen().isEmpty()) {
-			prop.put("x-den", node.getDen());
+			prop.put("x-oagis-den", node.getDen());
 		}
 
 		if (node.isNillable()) {
@@ -745,20 +520,20 @@ public class OpenApiSchemaBuilder {
 
 		// D2: Property-level component type (ASCC)
 		if (node.getComponentType() != null) {
-			prop.put("x-component-type", node.getComponentType());
+			prop.put("x-oagis-component-type", node.getComponentType());
 		}
 
 		// G1: Property-level GUID and DEN from ASCCP
 		if (node.getGuid() != null && !node.getGuid().isEmpty()) {
-			prop.put("x-guid", node.getGuid());
+			prop.put("x-oagis-guid", node.getGuid());
 		}
 		if (node.getDen() != null && !node.getDen().isEmpty()) {
-			prop.put("x-den", node.getDen());
+			prop.put("x-oagis-den", node.getDen());
 		}
 
 		// Phase 7: ASCCP reusable indicator
 		if (node.getReusable() != null) {
-			prop.put("x-reusable", node.getReusable());
+			prop.put("x-oagis-reusable", node.getReusable());
 		}
 
 		return prop;
@@ -780,7 +555,7 @@ public class OpenApiSchemaBuilder {
 		if (resolution.hasEnum()) {
 			type.put("enum", resolution.getEnumValues());
 			if (resolution.getEnumSource() != null) {
-				type.put("x-enum-source", resolution.getEnumSource());
+				type.put("x-oagis-enum-source", resolution.getEnumSource());
 			}
 		}
 		return type;
@@ -807,11 +582,16 @@ public class OpenApiSchemaBuilder {
 		return contact;
 	}
 
-	/** OAGIS uses Apache License 2.0. */
+	/**
+	 * OAGi permissive license (from {@code OAGi License Agreement.xml} in the OAGIS distribution).
+	 *
+	 * <p>Not Apache 2.0 — the OAGIS® standard uses its own license that permits reproduction,
+	 * distribution, and derivative works without fee, provided attribution is included.</p>
+	 */
 	private Map<String, Object> buildInfoLicense() {
 		Map<String, Object> license = new LinkedHashMap<>();
-		license.put("name", "Apache License 2.0");
-		license.put("url", "https://www.apache.org/licenses/LICENSE-2.0");
+		license.put("name", "OAGi License Agreement");
+		license.put("url", "https://oagi.org/pages/license");
 		return license;
 	}
 }

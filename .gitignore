@@ -35,3 +35,5 @@ Libraries/
 
 # dist/ is explicitly tracked (generated spec for GitHub raw URL consumption)
 !dist/
+.DS_Store
+srt-openapi/src/main/resources/OAGIS_10_6_StandardEdition_XML/

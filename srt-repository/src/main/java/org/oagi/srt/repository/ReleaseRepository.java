@@ -11,4 +11,7 @@ public interface ReleaseRepository extends JpaRepository<Release, Long> {
 
     @Query("select r.releaseId from Release r where r.releaseNum = ?1")
     public int findReleaseIdByReleaseNum(String releaseNum);
+
+    /** Returns the most recently imported release (highest PK). */
+    Release findFirstByOrderByReleaseIdDesc();
 }
