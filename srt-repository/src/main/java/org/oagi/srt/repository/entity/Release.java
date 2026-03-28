@@ -5,8 +5,16 @@ import org.hibernate.annotations.GenericGenerator;
 import javax.persistence.*;
 import java.io.Serializable;
 
+/**
+ * JPA entity for the {@code release} table.
+ *
+ * <p>The table name is backtick-quoted because {@code release} is a reserved word in
+ * MariaDB/MySQL. Without quoting, eager joins (e.g., {@link Module#release}) produce
+ * invalid SQL such as {@code from release release0_}, resulting in
+ * {@code MySQLSyntaxErrorException}.
+ */
 @Entity
-@Table(name = "release")
+@Table(name = "`release`")
 public class Release implements NamespaceAware, Serializable {
 
     public static final String SEQUENCE_NAME = "RELEASE_ID_SEQ";

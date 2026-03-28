@@ -67,6 +67,12 @@ public class DefaultImportedDataProvider implements ImportedDataProvider, Initia
     @Autowired
     private AssociationCoreComponentRepository asccRepository;
 
+    @Autowired
+    private NamespaceRepository namespaceRepository;
+
+    @Autowired
+    private ModuleRepository moduleRepository;
+
     @Override
     public void afterPropertiesSet() throws Exception {
         long s = System.currentTimeMillis();
@@ -77,6 +83,9 @@ public class DefaultImportedDataProvider implements ImportedDataProvider, Initia
 
         findAgencyIdListValueByOwnerListIdMap = agencyIdListValueRepository.findAll().stream()
                 .collect(Collectors.groupingBy(AgencyIdListValue::getOwnerListId));
+        findAgencyIdListValueByIdMap = findAgencyIdListValueByOwnerListIdMap.values().stream()
+                .flatMap(List::stream)
+                .collect(Collectors.toMap(AgencyIdListValue::getAgencyIdListValueId, Function.identity()));
 
         findCodeListList = codeListRepository.findAll();
         findCodeListMap = findCodeListList.stream()
@@ -127,6 +136,12 @@ public class DefaultImportedDataProvider implements ImportedDataProvider, Initia
         findAsccByFromAccIdMap = asccRepository.findAllWithRevisionNum(0).stream()
                 .collect(Collectors.groupingBy(AssociationCoreComponent::getFromAccId));
 
+        findNamespaceMap = namespaceRepository.findAll().stream()
+                .collect(Collectors.toMap(Namespace::getNamespaceId, Function.identity()));
+
+        findModuleMap = moduleRepository.findAll().stream()
+                .collect(Collectors.toMap(Module::getModuleId, Function.identity()));
+
         logger.info("Ready for " + getClass().getSimpleName() + " in " + (System.currentTimeMillis() - s) / 1000d + " seconds");
     }
 
@@ -149,6 +164,13 @@ public class DefaultImportedDataProvider implements ImportedDataProvider, Initia
     @Override
     public List<AgencyIdListValue> findAgencyIdListValueByOwnerListId(long ownerListId) {
         return findAgencyIdListValueByOwnerListIdMap.containsKey(ownerListId) ? findAgencyIdListValueByOwnerListIdMap.get(ownerListId) : Collections.emptyList();
+    }
+
+    private Map<Long, AgencyIdListValue> findAgencyIdListValueByIdMap;
+
+    @Override
+    public AgencyIdListValue findAgencyIdListValue(long agencyIdListValueId) {
+        return findAgencyIdListValueByIdMap.get(agencyIdListValueId);
     }
 
     private List<CodeList> findCodeListList;
@@ -289,5 +311,19 @@ public class DefaultImportedDataProvider implements ImportedDataProvider, Initia
     @Override
     public List<AssociationCoreComponent> findASCCByFromAccId(long fromAccId) {
         return (findAsccByFromAccIdMap.containsKey(fromAccId)) ? findAsccByFromAccIdMap.get(fromAccId) : Collections.emptyList();
+    }
+
+    private Map<Long, Namespace> findNamespaceMap;
+
+    @Override
+    public Namespace findNamespace(long namespaceId) {
+        return findNamespaceMap.get(namespaceId);
+    }
+
+    private Map<Long, Module> findModuleMap;
+
+    @Override
+    public Module findModule(long moduleId) {
+        return findModuleMap.get(moduleId);
     }
 }

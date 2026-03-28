@@ -21,6 +21,8 @@
 	<description>OAGi Semantic Refinement and Tooling</description>
 
 	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>1.8</java.version>
 		<spring.framework.version>4.3.25.RELEASE</spring.framework.version>
 		<!-- (JAF), 20260317, Upgraded from 1.4.2 to 1.5.22 to fix Hibernate 5.0.x duplicate converter registration bug -->

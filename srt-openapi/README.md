@@ -8,7 +8,10 @@ Generates [OpenAPI 3.1.0](https://spec.openapis.org/oas/v3.1.0) schemas from OAG
 - **`allOf` composition** — ACC inheritance via `based_acc_id` emitted as `allOf` references
 - **Alias detection** — identical ACCs referenced under different ASCCP names produce thin `allOf` wrappers instead of duplicate schemas
 - **XSD-to-OpenAPI type mapping** — 30+ XSD built-in types resolved through the BDT → CDT → XBT chain
-- **Enum generation** — automatic `enum` arrays from `CodeList` and `AgencyIdList` restrictions for maximum model fidelity
+- **Enum generation** — automatic `enum` arrays from `CodeList` and `AgencyIdList` restrictions, with per-value descriptions, labels, and CodeList provenance
+- **Exhaustive description enrichment** — concatenated definitions from BCCP+BCC, ASCCP+ASCC, ACC qualifiers, and DataType definitions for maximum semantic density
+- **Schema-level metadata** — `deprecated`, `x-abstract`, discriminator patterns, and `x-version` extensions
+- **Property-level metadata** — `default` values, nullable types (OAS 3.1.0 `type: [T, "null"]`), and bounded array constraints
 - **CRUD-style paths** — auto-generated REST endpoints referencing the root schema for documentation renderers (Redocly, Swagger UI)
 
 ---
@@ -150,8 +153,8 @@ srt-openapi/
 | `CcOpenApiGenerator`       | Orchestrates walk → build → YAML serialization pipeline                   |
 | `CcTreeWalker`             | Walks ASCCP → ACC → (BCC + ASCC children); detects aliases and cycles     |
 | `OpenApiSchemaBuilder`     | Converts `TreeResult` into OpenAPI doc with `allOf` composition and paths |
-| `TypeMapper`               | Resolves BDT → CDT → XBT chain to `TypeResolution` (type/format/enum)    |
-| `TypeResolution`           | Immutable value object carrying OAS type, format, and optional enum values|
+| `TypeMapper`               | Resolves BDT → CDT → XBT chain to `TypeResolution`; enriches with DataType metadata |
+| `TypeResolution`           | Immutable value object: type, format, enums, per-value metadata, DataType description, version |
 
 ### CC Tree Traversal (CcTreeWalker)
 
@@ -258,28 +261,41 @@ Since Amount, Measure, Quantity, and other financial types default to `Decimal` 
 
 ## Enum Generation
 
-When a BDT's default restriction references a **CodeList** or **AgencyIdList** (rather than a CDT Primitive), the generator extracts all allowed values and emits them as OpenAPI `enum` arrays.
+When a BDT's default restriction references a **CodeList** or **AgencyIdList** (rather than a CDT Primitive), the generator extracts all allowed values and emits them as OpenAPI `enum` arrays with rich per-value metadata.
 
 ### Resolution Chain
 
 ```
-bdtId → BDT_PRI_RESTRI (default)
-  ├─ codeListId > 0
-  │    → CodeList (name for traceability)
-  │    → CodeListValue[] → .getValue() → enum: ["USD", "EUR", ...]
-  │
-  └─ agencyIdListId > 0
-       → AgencyIdList (name for traceability)
-       → AgencyIdListValue[] → .getValue() → enum: ["6", "16", ...]
+bdtId -> BDT_PRI_RESTRI (all restrictions scanned)
+  |-- codeListId > 0
+  |    -> CodeList (name, definition, remark, definitionSource, versionId, extensibleIndicator,
+  |    |            listId, agencyId)
+  |    |    +-- .getListId()    -> x-enum-list-id: "oacl_CurrencyCode"
+  |    |    +-- .getAgencyId()  -> AgencyIdListValue.getName() -> x-enum-agency: "UN/CEFACT"
+  |    |
+  |    -> CodeListValue[] (filtered: usedIndicator=true only)
+  |         |-- .getValue()              -> enum: ["USD", "EUR", ...]
+  |         |-- .getDefinition()         -> x-enum-descriptions: {USD: "...", EUR: "..."}
+  |         |-- .getName()               -> x-enum-labels: {USD: "US Dollar", EUR: "Euro"}
+  |         |-- .getDefinitionSource()   -> x-enum-value-sources: {USD: "ISO 4217", ...}
+  |         +-- .getExtensionIndicator() -> x-enum-extensions: {ZZZ: true}
+  |
+  +-- agencyIdListId > 0  (full parity with CodeList)
+       -> AgencyIdList (name, definition, versionId, listId)
+       |    +-- .getListId() -> x-enum-list-id: "oagis-id-..."
+       -> AgencyIdListValue[]
+            |-- .getValue()      -> enum: ["6", "16", ...]
+            |-- .getDefinition() -> x-enum-descriptions: {6: "...", 16: "..."}
+            +-- .getName()       -> x-enum-labels: {6: "DUNS", 16: "EAN"}
 ```
 
 ### Implementation
 
 | Class            | Responsibility |
 |:-----------------|:---------------|
-| `TypeMapper`     | Detects code list restrictions in `BDT_PRI_RESTRI`, fetches values via `ImportedDataProvider` |
-| `TypeResolution`  | Carries `type`, `format`, `enumValues` (nullable), and `enumSource` (traceability string) |
-| `OpenApiSchemaBuilder` | Injects `enum` array into property schema when `TypeResolution.hasEnum()` is true |
+| `TypeMapper`     | Detects code list restrictions in `BDT_PRI_RESTRI`, fetches values and per-value metadata via `ImportedDataProvider`. Resolves DT_SC supplementary components. |
+| `TypeResolution`  | Carries `enumValues`, `enumSource`, `enumDescriptions`, `enumLabels`, `enumSourceDescription`, `enumRemark`, `enumDefinitionSource`, `enumListId`, `enumAgency`, `enumExtensions`, `dataTypeDescription`, `dataTypeVersion`, `supplementaryComponents` |
+| `OpenApiSchemaBuilder` | Injects all `enum`/`x-enum-*` extensions, DataType metadata, CCTS metadata, namespace, GUID/DEN |
 
 ### Example Output
 
@@ -287,36 +303,142 @@ A field constrained by the OAGIS Currency Code List would generate:
 
 ```yaml
 currencyCode:
-  type: string
-  enum:
-    - AED
-    - AFN
-    - ALL
-    - AMD
-    - ANG
-    # ... (all ISO 4217 codes)
-    - ZMW
-    - ZWL
-```
+  description: >-
+    The currency for this amount.
 
-An agency identification field would generate:
-
-```yaml
-agencyIdentification:
+    A character string that constitutes the recognized code designator of the currency.
   type: string
-  enum:
-    - "1"    # UN/ECE
-    - "2"    # CEN/ISSS
-    - "6"    # UN/CEFACT
-    - "16"   # DUNS
-    # ... (all registered agency codes)
+  enum: [AED, AFN, ALL, AMD, ANG, ...]   # only usedIndicator=true values
+  x-enum-source: "CodeList: oacl_CurrencyCode (v1)"
+  x-enum-list-id: "oacl_CurrencyCode"
+  x-enum-agency: "UN/CEFACT"
+  x-enum-descriptions:
+    AED: "United Arab Emirates Dirham"
+    AFN: "Afghani"
+  x-enum-labels:
+    AED: "UAE Dirham"
+    AFN: "Afghani"
+  x-enum-remark: "Based on ISO 4217"
+  x-enum-definition-source: "UN/ECE Rec 9"
+  x-enum-extensible: true
+  x-enum-value-sources:
+    AED: "ISO 4217"
+    AFN: "ISO 4217"
+  x-enum-extensions:
+    ZZZ: true
+  x-component-type: BCC
+  x-entity-type: Element
+  x-representation-term: Code
+  x-guid: "oagis-id-abc123..."
+  x-den: "Currency. Code"
 ```
 
 ### Design Rationale
 
 - **Enum at the type level, not the property level**: The allowed values are a property of the data type (BDT), not the individual BCCP. Every field referencing the same BDT gets the same enum constraint.
-- **Maximum model fidelity**: Enums enable client-side validation, IDE autocompletion, and documentation tooling (Redocly, Swagger UI) to display allowed values without external reference lookups.
-- **Source traceability**: `TypeResolution.enumSource` preserves the origin (e.g., `"CodeList: oacl_CurrencyCode"`) for debugging and auditing.
+- **Full AgencyIdList parity**: `AgencyIdListValue.name` → `x-enum-labels`, `.definition` → `x-enum-descriptions`, and `AgencyIdList.definition` → property description, matching CodeList behavior.
+- **Per-value metadata**: `x-enum-descriptions` and `x-enum-labels` enable documentation tooling to display human-readable names and definitions alongside code values.
+- **CodeList provenance**: The `CodeList.definition` is appended to the property description as a complementary paragraph, providing context about the code list itself.
+- **Source traceability**: `x-enum-source` preserves the origin with version (e.g., `"CodeList: oacl_CurrencyCode (v1)"`) for debugging and auditing.
+- **Active-value filtering**: `CodeListValue.usedIndicator` controls which values appear in the `enum` array, ensuring unused legacy codes are excluded from consumers.
+- **Standard identifier**: `x-enum-list-id` exposes the external code list identifier (e.g., `oacl_CurrencyCode`) for cross-referencing with OAGIS standards.
+- **Agency attribution**: `x-enum-agency` resolves the maintaining agency from the FK chain (`CodeList.agencyId` -> `AgencyIdListValue.name`), e.g., `"UN/CEFACT"`.
+- **Extension flags**: `x-enum-extensions` marks user-defined code values, enabling consumers to distinguish standard from extended entries.
+
+---
+
+## Schema Enrichment
+
+The generator exhaustively extracts semantic metadata from OAGIS database entities to produce maximally rich OpenAPI schemas. Every field below is sourced from database records, never synthesized.
+
+### Description Concatenation
+
+Instead of simple fallback logic, definitions from multiple OAGIS entities are **concatenated as complementary paragraphs** (separated by `\n\n`), preserving both the generic meaning and the usage-specific context:
+
+| Source Pair | Example |
+|:------------|:--------|
+| BCCP.definition + BCC.definition | Generic property meaning + context-specific usage in the parent ACC |
+| ASCCP.definition + ASCC.definition | Generic association meaning + context-specific role in the parent ACC |
+| Property description + DataType.definition + DataType.contentComponentDefinition | Property semantics + data type semantics |
+| Property description + CodeList.definition | Property semantics + code list provenance |
+
+### DB Entity -> OAS Output Mapping
+
+| DB Entity | DB Field | OAS Output | Location |
+|:----------|:---------|:-----------|:---------|
+| BCC | `definition` | Appended to property `description` | Property schema |
+| BCCP | `definition` | Prepended to property `description` | Property schema |
+| BCCP | `representationTerm` | `x-representation-term` | Property extensions |
+| BCCP | `guid` | `x-guid` | Property extensions |
+| BCCP | `den` | `x-den` | Property extensions |
+| ASCC | `definition` | Appended to association `description` | Association property |
+| ASCCP | `definition` | Prepended to association `description` | Association property |
+| ASCCP | `guid` | `x-guid` | Association property extensions |
+| ASCCP | `den` | `x-den` | Association property extensions |
+| ACC | `definition` | Schema-level `description` | `components/schemas` |
+| ACC | `objectClassQualifier` | Prepended as `**Qualifier:** ...` + `x-qualifier` | Schema `description` + extensions |
+| ACC | `isAbstract` | `x-abstract: true` | Schema extensions |
+| ACC | `guid` | `x-guid` | Schema extensions |
+| ACC | `den` | `x-den` | Schema extensions |
+| ACC | `namespaceId` -> Namespace.uri | `x-namespace` | Schema extensions |
+| ACC | `moduleId` -> Module.module | `x-module` | Schema extensions |
+| ASCCP | `reusableIndicator` | `x-reusable: true` | Association property extensions |
+| BCC | `entityType` | `x-entity-type: "Element"/"Attribute"` | Property extensions |
+| BCC | `isNillable` | `type: [T, "null"]` | Property schema |
+| BCC | `defaultValue` | `default: "value"` | Property schema |
+| DataType | `definition` | Appended to property `description` | Property schema |
+| DataType | `qualifier` | `x-qualifier` | Property extensions |
+| DataType | `contentComponentDen` | `x-content-component-den` | Property extensions |
+| DataType | `contentComponentDefinition` | Appended to `description` + `x-content-component-definition` | Property schema + extensions |
+| DataType | `versionNum` | `x-version: "1.0"` | Property extensions |
+| DT_SC | supplementary components | `x-supplementary-components` | Property extensions |
+| CodeList | `definition` | Appended to property `description` | Property schema |
+| CodeList | `remark` | `x-enum-remark` | Property extensions |
+| CodeList | `definitionSource` | `x-enum-definition-source` | Property extensions |
+| CodeList | `extensibleIndicator` | `x-enum-extensible: true` | Property extensions |
+| CodeList | `versionId` | Included in `x-enum-source` | Property extensions |
+| CodeListValue | `definition` | `x-enum-descriptions: {code: def}` | Property extensions |
+| CodeListValue | `name` | `x-enum-labels: {code: label}` | Property extensions |
+| CodeListValue | `definitionSource` | `x-enum-value-sources: {code: src}` | Property extensions |
+| CodeListValue | `usedIndicator` | Filters unused values from `enum` array | Behavioral |
+| CodeListValue | `extensionIndicator` | `x-enum-extensions: {code: true}` | Property extensions |
+| CodeList | `listId` | `x-enum-list-id: "oacl_..."` | Property extensions |
+| CodeList | `agencyId` | `x-enum-agency: "UN/CEFACT"` | Property extensions |
+| AgencyIdList | `definition` | Appended to property `description` | Property schema |
+| AgencyIdList | `listId` | `x-enum-list-id: "oagis-id-..."` | Property extensions |
+| AgencyIdList | `versionId` | Included in `x-enum-source` | Property extensions |
+| AgencyIdListValue | `definition` | `x-enum-descriptions: {val: def}` | Property extensions |
+| AgencyIdListValue | `name` | `x-enum-labels: {val: label}` | Property extensions |
+
+### Custom Extensions
+
+| Extension | Source | Purpose |
+|:----------|:-------|:--------|
+| `x-abstract` | `ACC.isAbstract` | Marks schemas not intended for direct instantiation |
+| `x-component-type` | CcNode.componentType | CCTS component type: "ACC" (schema), "BCC"/"ASCC" (property) |
+| `x-entity-type` | `BCC.entityType` | CCTS entity type: "Element" or "Attribute" |
+| `x-representation-term` | `BCCP.representationTerm` | CCTS representation term (e.g., "Text", "Code", "Amount") |
+| `x-version` | `DataType.versionNum` | Data type version for traceability |
+| `x-namespace` | `ACC.namespaceId` -> `Namespace.uri` | OAGIS namespace provenance |
+| `x-qualifier` | `ACC.objectClassQualifier` / `DataType.qualifier` | CCTS qualifier distinguishing specialized types |
+| `x-module` | `ACC.moduleId` -> `Module.module` | Source XSD module file for provenance traceability |
+| `x-reusable` | `ASCCP.reusableIndicator` | Whether the ASCCP can be reused across multiple ACCs |
+| `x-content-component-den` | `DataType.contentComponentDen` | DEN of the content component within a BDT |
+| `x-content-component-definition` | `DataType.contentComponentDefinition` | Definition of the content component within a BDT |
+| `x-guid` | `ACC/BCCP/ASCCP.guid` | OAGIS GUID for schema/property traceability |
+| `x-den` | `ACC/BCCP/ASCCP.den` | OAGIS Dictionary Entry Name |
+| `x-supplementary-components` | `DT_SC` via `findDtScByOwnerDtId` | Supplementary components (e.g., Amount.currencyCode) |
+| `x-enum-source` | `CodeList.name`/`AgencyIdList.name` + versionId | Provenance of enum constraints with version |
+| `x-enum-descriptions` | `CodeListValue.definition` / `AgencyIdListValue.definition` | Per-value definitions for documentation |
+| `x-enum-labels` | `CodeListValue.name` / `AgencyIdListValue.name` | Per-value human-readable display names |
+| `x-enum-remark` | `CodeList.remark` | Additional remarks about the code list |
+| `x-enum-definition-source` | `CodeList.definitionSource` | Source of the code list definition |
+| `x-enum-extensible` | `CodeList.extensibleIndicator` | Whether the code list accepts user extensions |
+| `x-enum-value-sources` | `CodeListValue.definitionSource` | Per-value attribution (where each value was defined) |
+| `x-enum-list-id` | `CodeList.listId` / `AgencyIdList.listId` | External standard identifier for the code list |
+| `x-enum-agency` | `CodeList.agencyId` → `AgencyIdListValue.name` | Responsible agency that maintains the code list |
+| `x-enum-extensions` | `CodeListValue.extensionIndicator` | Per-value flag identifying user-defined extensions |
+
 
 ---
 
@@ -471,11 +593,17 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_211.jdk/Contents/Hom
 
 ---
 
-## Verification Results (Purchase Order)
+## Verification Results (Super-Schema)
 
 | Metric             | Value               |
 | :----------------- | :------------------ |
-| Total schemas       | 267 (213 + 54 aliases) |
+| Total schemas       | ~3,067 (2,272 + 795 aliases) |
+| `x-qualifier` count | 1,367               |
+| `x-module` count    | 2,230               |
+| `x-reusable` count  | 4,818               |
+| `x-content-component-den` count | 1,553   |
+| `x-content-component-definition` count | 27 |
+| Enum extensions     | `x-enum-descriptions`, `x-enum-labels`, `x-enum-source`, `x-enum-agency` |
 | Redocly lint errors | 0                   |
-| Output file         | `PurchaseOrder.openapi.yaml` |
-| HTML doc size       | ~57 MB              |
+| Output file         | `oagis-super-schema.openapi.yaml` |
+| File size           | ~10 MB (247,892 lines) |
