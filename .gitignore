@@ -35,3 +35,4 @@ Libraries/
 
 # dist/ is explicitly tracked (generated spec for GitHub raw URL consumption)
 !dist/
+.DS_Store
