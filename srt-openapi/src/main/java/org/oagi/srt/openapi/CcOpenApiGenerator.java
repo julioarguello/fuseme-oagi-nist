@@ -6,6 +6,8 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import org.oagi.srt.openapi.CcTreeWalker.SuperTreeResult;
 import org.oagi.srt.openapi.CcTreeWalker.TreeResult;
+import org.oagi.srt.repository.ReleaseRepository;
+import org.oagi.srt.repository.entity.Release;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +35,12 @@ public class CcOpenApiGenerator {
 	@Autowired
 	private OpenApiSchemaBuilder openApiSchemaBuilder;
 
+	@Autowired
+	private ReleaseRepository releaseRepository;
+
+	@Autowired
+	private OperationOverlayBuilder operationOverlayBuilder;
+
 	/**
 	 * Generate an OpenAPI YAML file for the given ASCCP property term.
 	 *
@@ -42,6 +50,8 @@ public class CcOpenApiGenerator {
 	 */
 	public File generate(String asccpPropertyTerm, File outputDir) throws IOException {
 		logger.info("Generating OpenAPI for ASCCP: {}", asccpPropertyTerm);
+
+		String releaseNum = resolveReleaseNum();
 
 		// Walk the CC tree
 		TreeResult treeResult = ccTreeWalker.walk(asccpPropertyTerm);
@@ -55,7 +65,8 @@ public class CcOpenApiGenerator {
 
 		// Build the OpenAPI document
 		Map<String, Object> openApiDoc = openApiSchemaBuilder.build(
-				treeResult, asccpPropertyTerm + " API", treeResult.getRootSchemaName());
+				treeResult, asccpPropertyTerm + " API",
+				releaseNum);
 
 		return writeYaml(openApiDoc, outputDir, treeResult.getRootSchemaName() + ".openapi.yaml");
 	}
@@ -69,6 +80,8 @@ public class CcOpenApiGenerator {
 	public File generateSuper(File outputDir) throws IOException {
 		logger.info("=== Generating OAGIS Super Schema ===");
 
+		String releaseNum = resolveReleaseNum();
+
 		SuperTreeResult superResult = ccTreeWalker.walkAll();
 		logger.info("Super walk complete: {} roots, {} schemas, {} aliases",
 				superResult.getRootSchemaNames().size(),
@@ -76,9 +89,39 @@ public class CcOpenApiGenerator {
 				superResult.getAliasMap().size());
 
 		Map<String, Object> openApiDoc = openApiSchemaBuilder.buildSuper(
-				superResult, "OAGIS Core Components — Super Schema");
+				superResult, "OAGIS Core Components \u2014 Super Schema", releaseNum);
 
-		return writeYaml(openApiDoc, outputDir, "oagis-super-schema.openapi.yaml");
+		String fileName = "oagis-" + releaseNum + "-super-schema.openapi.yaml";
+		return writeYaml(openApiDoc, outputDir, fileName);
+	}
+
+	/**
+	 * Generate a super-schema with CRUD operations for all root ASCCP nouns.
+	 * Produces a full API spec (schema catalog + RESTful paths + security).
+	 *
+	 * @param outputDir  directory to write the YAML file to
+	 * @return the generated File
+	 */
+	public File generateSuperWithOperations(File outputDir) throws IOException {
+		logger.info("=== Generating OAGIS Super Schema with Operations ===");
+
+		String releaseNum = resolveReleaseNum();
+
+		SuperTreeResult superResult = ccTreeWalker.walkAll();
+		logger.info("Super walk complete: {} roots, {} schemas, {} aliases",
+				superResult.getRootSchemaNames().size(),
+				superResult.getSchemas().size(),
+				superResult.getAliasMap().size());
+
+		Map<String, Object> openApiDoc = openApiSchemaBuilder.buildSuper(
+				superResult, "OAGIS Core Components \u2014 API", releaseNum);
+
+		// Add CRUD operations for every root ASCCP noun
+		operationOverlayBuilder.addOperations(openApiDoc, superResult.getRootSchemaNames());
+		logger.info("Added CRUD operations for {} root nouns", superResult.getRootSchemaNames().size());
+
+		String fileName = "oagis-" + releaseNum + "-api.openapi.yaml";
+		return writeYaml(openApiDoc, outputDir, fileName);
 	}
 
 	private File writeYaml(Map<String, Object> doc, File outputDir, String fileName) throws IOException {
@@ -101,5 +144,19 @@ public class CcOpenApiGenerator {
 
 		logger.info("OpenAPI spec written to: {}", outputFile.getAbsolutePath());
 		return outputFile;
+	}
+
+	/**
+	 * Reads the OAGIS release number from the DB (latest imported release).
+	 * Falls back to "unknown" if the release table is empty.
+	 */
+	private String resolveReleaseNum() {
+		Release latest = releaseRepository.findFirstByOrderByReleaseIdDesc();
+		if (latest == null) {
+			logger.warn("No release found in DB; using 'unknown' as version");
+			return "unknown";
+		}
+		logger.info("OAGIS release: {} (releaseId={})", latest.getReleaseNum(), latest.getReleaseId());
+		return latest.getReleaseNum();
 	}
 }

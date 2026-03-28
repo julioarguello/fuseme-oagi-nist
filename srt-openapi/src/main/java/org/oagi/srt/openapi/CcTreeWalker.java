@@ -568,7 +568,7 @@ public class CcTreeWalker {
 		for (String word : term.split("\\s+")) {
 			if (!word.isEmpty()) {
 				if ("Identifier".equals(word)) {
-					sb.append("ID");
+					sb.append("Id");
 				} else {
 					sb.append(Character.toUpperCase(word.charAt(0)));
 					if (word.length() > 1) {

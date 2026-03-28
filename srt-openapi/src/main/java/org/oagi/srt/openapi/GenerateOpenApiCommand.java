@@ -18,6 +18,8 @@ import java.io.File;
  *   java ... --openapi.asccp="Purchase Order" --openapi.output=./output
  * Usage (super schema):
  *   java ... --openapi.mode=super --openapi.output=./output
+ * Usage (full API with operations):
+ *   java ... --openapi.mode=api --openapi.output=./output
  */
 @Component
 @Profile("generate-openapi")
@@ -49,6 +51,9 @@ public class GenerateOpenApiCommand implements CommandLineRunner {
 		if ("super".equalsIgnoreCase(mode)) {
 			logger.info("Generating super-schema (all root nouns)...");
 			result = generator.generateSuper(outputDir);
+		} else if ("api".equalsIgnoreCase(mode)) {
+			logger.info("Generating full API (schema + CRUD operations)...");
+			result = generator.generateSuperWithOperations(outputDir);
 		} else {
 			logger.info("ASCCP: {}", asccpPropertyTerm);
 			result = generator.generate(asccpPropertyTerm, outputDir);

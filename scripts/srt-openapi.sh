@@ -22,7 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="$PROJECT_ROOT/openapi-output"
 DIST_DIR="$PROJECT_ROOT/dist"
-SPEC_NAME="oagis-super-schema.openapi.yaml"
+# Filename is now version-dependent (e.g. oagis-10.3-super-schema.openapi.yaml);
+# resolved after generation in Step 2.
+SPEC_NAME=""
 JAVA8_HOME="$(/usr/libexec/java_home -v 1.8.0_211 2>/dev/null || /usr/libexec/java_home -v 1.8 2>/dev/null || echo "")"
 
 # Database config
@@ -109,10 +111,13 @@ CLASSPATH="$CLASSPATH:$JAVA8_HOME/lib/tools.jar"
     -Dspring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL5InnoDBDialect \
     org.oagi.srt.openapi.OpenApiApplication
 
-if [[ ! -f "$OUTPUT_DIR/$SPEC_NAME" ]]; then
-    echo "ERROR: Expected output not found: $OUTPUT_DIR/$SPEC_NAME" >&2
+# Auto-detect the versioned filename produced by the generator
+SPEC_FILE=$(ls "$OUTPUT_DIR"/oagis-*-super-schema.openapi.yaml 2>/dev/null | head -1)
+if [[ -z "$SPEC_FILE" ]]; then
+    echo "ERROR: No oagis-*-super-schema.openapi.yaml found in $OUTPUT_DIR" >&2
     exit 1
 fi
+SPEC_NAME=$(basename "$SPEC_FILE")
 echo "    Generated: $OUTPUT_DIR/$SPEC_NAME"
 
 # -- Step 3: Validate --------------------------------------------------------
