@@ -439,6 +439,72 @@ Instead of simple fallback logic, definitions from multiple OAGIS entities are *
 | `x-enum-agency` | `CodeList.agencyId` → `AgencyIdListValue.name` | Responsible agency that maintains the code list |
 | `x-enum-extensions` | `CodeListValue.extensionIndicator` | Per-value flag identifying user-defined extensions |
 
+### Excluded Fields
+
+The following database fields are **intentionally not mapped** to the OpenAPI output. Each exclusion has been audited and falls into one of the categories below.
+
+**Scope**: Categories 1-4 (PKs, FKs, audit, revision) apply to the 6 core CC entities **and** to auxiliary entities (CodeList, CodeListValue, AgencyIdList, AgencyIdListValue, DT_SC, Namespace, Module, Xbt). Auxiliary entities also have UI-state fields (`CodeListValue.lockedIndicator`, `CodeListValue.color`, `CodeListValue.disabled`, `CodeList.editDisabled`, `CodeList.deleteDisabled`, `CodeList.discardDisabled`) that are internal to the Score CMS editing interface and are excluded for the same reason as Category 1.
+
+#### Category 1: Internal Audit & Lifecycle
+
+**Fields** (present in all 6 entities): `createdBy`, `ownerUserId`, `lastUpdatedBy`, `creationTimestamp`, `lastUpdateTimestamp`, `state`
+
+Score CMS authoring metadata that records _who_ edited a CC and _when_, along with the component's editorial lifecycle state (Draft, Candidate, Published). These are internal to the collaborative editing workflow and have no semantic relevance for API schema consumers. The generated schema represents the _published_ specification, not its editorial history.
+
+#### Category 2: Revision Tracking
+
+**Fields** (present in all 6 entities): `revisionNum`, `revisionTrackingNum`, `revisionAction`, `releaseId`, `currentXxxId`
+
+The Score CMS's multi-user revision control system (optimistic concurrency, amendment tracking, release bundle management). These track internal change history within the OAGIS database, not the semantic versioning of the data types. `DataType.versionNum` already captures the externally meaningful version and is emitted as `x-version`.
+
+#### Category 3: Surrogate Primary Keys
+
+**Fields**: `accId`, `bccId`, `bccpId`, `asccId`, `asccpId`, `dtId`
+
+Auto-generated database primary keys used exclusively for FK joins during tree traversal. The OAGIS GUID (`guid`) serves as the portable, specification-level unique identifier and is emitted as `x-guid`.
+
+#### Category 4: Foreign Key Join Columns
+
+**Fields**: `BCC.fromAccId`, `BCC.toBccpId`, `ASCC.fromAccId`, `ASCC.toAsccpId`, `ASCCP.roleOfAccId`, `DataType.basedDtId`, `DataType.previousVersionDtId`
+
+Structural join columns used by `CcTreeWalker` to navigate the CC tree. Their information is already captured by the resulting schema structure itself (`$ref`, `allOf`, property containment).
+
+#### Category 5: Redundant Association-Entity Fields
+
+**Fields**: `BCC.guid`, `ASCC.guid`, `BCC.den`, `ASCC.den`
+
+BCC and ASCC are association-table entities linking an ACC to a BCCP/ASCCP. Their GUIDs and DENs are redundant with the property-level equivalents:
+- **GUIDs**: BCCP and ASCCP GUIDs are the canonical, externally referenceable identifiers (emitted as `x-guid` on properties).
+- **DENs**: The BCCP and ASCCP DENs are emitted as `x-den` on properties. The BCC/ASCC DENs are a computed superset (parent object class + property DEN) that adds no new information.
+
+#### Category 6: ACC Internal Classification
+
+**Fields**: `ACC.oagisComponentType`
+
+OAGIS ontology classification enum (Base, Semantics, Extension, SemanticGroup, UserExtensionGroup, Embedded, OAGIS10Nouns, OAGIS10BODs). This is an internal OAGIS architecture discriminator used during the CC tree import and type hierarchy construction. The schema-level `x-component-type: ACC` already identifies the component kind for API consumers. The finer-grained OAGIS classification is not meaningful outside the OAGIS editorial toolchain.
+
+#### Category 7: DataType Internal Fields
+
+**Fields**: `DataType.revisionDoc`, `DataType.dataTypeTerm`, `DataType.den`, `DataType.type`, `DataType.guid`, `DataType.deprecated`
+
+- `revisionDoc`: Change notes for the DT, internal to the OAGIS editorial process.
+- `dataTypeTerm`: Used internally for type matching (e.g., "Amount", "Code"), already represented via `x-representation-term` from BCCP.
+- `den`: Already represented via the property-level `x-den` from BCCP.
+- `type`: Internal discriminator (BDT=1 / CDT=0), not a consumer-facing attribute.
+- `guid`: DT-level GUID is not needed; the property-level GUID from BCCP/ASCCP provides sufficient traceability.
+- `deprecated`: DT deprecation is surfaced through the BCC/BCCP `deprecated` flag at the consumer-facing level.
+
+#### Category 8: Module/Namespace at Property Level
+
+**Fields**: `BCCP.moduleId`, `BCCP.namespaceId`, `ASCCP.moduleId`, `ASCCP.namespaceId`, `DataType.moduleId`
+
+Module and namespace provenance is emitted at the ACC (schema) level via `x-module` and `x-namespace`. Repeating it at every property would be redundant since properties inherit the namespace of their containing schema. ASCC properties reference schemas that carry their own namespace metadata.
+
+#### Category 9: Property-Template Fields Shadowed by Association Context
+
+**Fields**: `BCCP.nillable`, `BCCP.defaultValue`, `ASCCP.nillable`
+
+In CCTS, BCCP and ASCCP define reusable **property templates**, while BCC and ASCC customize them **per context** (per-ACC usage). The pipeline correctly reads `nillable` and `defaultValue` from the association entity (BCC), which carries the context-specific override. The BCCP-level values are the template defaults, superseded by `BCC.isNillable()`/`BCC.getDefaultValue()` in any concrete usage. For ASCCP, association-level nillability is always `false` (object references are not nillable in the target schema).
 
 ---
 
@@ -530,6 +596,123 @@ Key design decisions:
 - **Conservative scope**: Only schemas with a pre-existing `typeCode` BCC qualify. No synthetic discriminator properties are injected.
 - **Purely additive**: The `discriminator` block is metadata for tools (Redocly, Swagger Codegen). It does not change validation behavior — `allOf` inheritance is preserved unchanged.
 - **Derived types map**: Computed in `CcTreeWalker` by reversing `baseSchemaMap` (child→parent) into parent→[sorted children].
+
+---
+
+## Complete Transformation Example
+
+This section traces a single BCC property end-to-end: from the database entities through the pipeline to the final OpenAPI YAML. The example uses a hypothetical `totalAmount` property of a `PurchaseOrder` ACC.
+
+### Step 1: Database Entities
+
+```
+ASCCP  asccpId=100  propertyTerm="Purchase Order"  roleOfAccId=200  guid="guid-asccp-po"
+  ACC  accId=200    objectClassTerm="Purchase Order"  definition="A document..."  namespaceId=5  moduleId=3
+    BCC  bccId=301  toBccpId=400  fromAccId=200  cardinalityMin=0  cardinalityMax=1
+         entityType=1(Element)  nillable=true  defaultValue=null  definition="The total monetary..."
+      BCCP  bccpId=400  propertyTerm="Total Amount"  representationTerm="Amount"
+             bdtId=500  definition="A monetary value."  guid="guid-bccp-total"  den="Total Amount. Amount"
+        DT  dtId=500  dataTypeTerm="Amount"  qualifier=null  versionNum="1.0"
+            contentComponentDen="Amount. Content"  contentComponentDefinition="The numeric amount value."
+            definition="A number of monetary units specified using a given unit of currency."
+          BDT_PRI_RESTRI  bdtPriRestriId=600  bdtId=500  isDefault=true
+                          cdtAwdPriXpsTypeMapId=700  codeListId=0  agencyIdListId=0
+            CDT_AWD_PRI_XPS_TYPE_MAP  cdtAwdPriXpsTypeMapId=700  xbtId=800
+              XBT  xbtId=800  builtInType="xsd:decimal"
+          DT_SC  dtScId=901  ownerDtId=500  propertyTerm="Currency"  representationTerm="Code"
+                 cardinalityMin=0  cardinalityMax=1  definition="The currency designator."
+```
+
+### Step 2: CcTreeWalker Output (CcNode)
+
+The walker produces a `CcNode` for the BCC:
+
+```java
+CcNode {
+  kind          = BCC_ELEMENT       // entityType=1 -> Element
+  propertyName  = "totalAmount"     // camelCase("Total Amount")
+  description   = "A monetary value.\n\nThe total monetary..."  // BCCP.def + BCC.def
+  cardinalityMin = 0
+  cardinalityMax = 1
+  bdtId          = 500
+  nillable       = true
+  deprecated     = false
+  defaultValue   = null
+  componentType  = "BCC"
+  entityType     = "Element"
+  representationTerm = "Amount"
+  guid           = "guid-bccp-total"
+  den            = "Total Amount. Amount"
+}
+```
+
+### Step 3: TypeMapper Resolution
+
+```
+resolve(bdtId=500)
+  -> BDT_PRI_RESTRI: no codeListId, no agencyIdListId
+  -> default restriction: cdtAwdPriXpsTypeMapId=700
+  -> CDT_AWD_PRI_XPS_TYPE_MAP -> XBT: builtInType="xsd:decimal"
+  -> XSD_TO_OPENAPI["xsd:decimal"] = {type: "number", format: null}
+  -> enrichWithDataType(bdtId=500):
+       dtDesc = "A number of monetary units...\n\nThe numeric amount value."
+       dtVersion = "1.0"
+       supplementaryComponents = [{name: "Currency", type: "string", description: "The currency...", required: false}]
+```
+
+**Result:** `TypeResolution(type="number", format=null, enumValues=null, dataTypeDescription="...", dataTypeVersion="1.0", supplementaryComponents=[...])`
+
+### Step 4: OpenApiSchemaBuilder Output
+
+```yaml
+# Schema level (from ACC)
+PurchaseOrder:
+  type: object
+  description: "A document..."
+  x-component-type: ACC
+  x-namespace:
+    uri: "http://www.openapplications.org/oagis/10"
+    prefix: oa
+  x-guid: "guid-acc-po"
+  x-den: "Purchase Order. Details"
+  x-module: "Model/Platform/2_7/Common/Components/Components.xsd"
+  properties:
+    # Property level (from BCC + BCCP + TypeResolution)
+    totalAmount:
+      description: >-
+        A monetary value.
+
+        The total monetary...
+
+        A number of monetary units specified using a given unit of currency.
+
+        The numeric amount value.
+      type:
+        - number
+        - "null"
+      x-component-type: BCC
+      x-entity-type: Element
+      x-representation-term: Amount
+      x-guid: "guid-bccp-total"
+      x-den: "Total Amount. Amount"
+      x-version: "1.0"
+      x-supplementary-components:
+        - name: Currency
+          representationTerm: Code
+          type: string
+          description: "The currency designator."
+          required: false
+      x-content-component-den: "Amount. Content"
+      x-content-component-definition: "The numeric amount value."
+```
+
+This example demonstrates:
+1. **Description concatenation**: BCCP.definition + BCC.definition + DT.definition + DT.contentComponentDefinition
+2. **Nullable type**: `nillable=true` -> `type: [number, "null"]`
+3. **Arbitrary-precision decimal**: `xsd:decimal` -> `number` without format
+4. **Supplementary components**: DT_SC emitted as `x-supplementary-components`
+5. **CCTS metadata**: `x-component-type`, `x-entity-type`, `x-representation-term`, `x-den`
+6. **Traceability**: `x-guid` from BCCP, `x-version` from DT
 
 ---
 

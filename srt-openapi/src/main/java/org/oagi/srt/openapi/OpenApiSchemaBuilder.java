@@ -13,9 +13,20 @@ import java.util.*;
  * Converts the CcTreeWalker output into an OpenAPI 3.1.0 schema structure
  * represented as nested Maps (ready for YAML/JSON serialization).
  *
- * Uses allOf composition for ACC inheritance (based_acc_id). In OAS 3.1.0,
+ * <p>Uses allOf composition for ACC inheritance (based_acc_id). In OAS 3.1.0,
  * $ref can coexist with sibling keywords like description, so no allOf
- * wrapper is needed for association properties.
+ * wrapper is needed for association properties.</p>
+ *
+ * <h3>Field exclusion policy</h3>
+ * <p>Approximately 60 entity fields across ACC, BCC, BCCP, ASCC, ASCCP, and DataType
+ * are intentionally excluded from the OpenAPI output. These fall into categories such as
+ * internal audit/lifecycle metadata, revision tracking, surrogate primary keys, FK join
+ * columns, redundant GUIDs, CC-level definition sources, DataType internals, and
+ * module/namespace at the property level. All exclusions have been audited for semantic
+ * relevance and documented with justifications.</p>
+ *
+ * @see CcTreeWalker.WalkContext WalkContext (excluded fields list)
+ * @see <a href="../../../../../../README.md">README.md § Excluded Fields</a>
  */
 @Component
 @Lazy
