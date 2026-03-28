@@ -12,6 +12,8 @@ public interface ImportedDataProvider {
 
     public List<AgencyIdListValue> findAgencyIdListValueByOwnerListId(long ownerListId);
 
+    public AgencyIdListValue findAgencyIdListValue(long agencyIdListValueId);
+
     public List<CodeList> findCodeList();
 
     public CodeList findCodeList(long codeListId);
@@ -51,4 +53,8 @@ public interface ImportedDataProvider {
     public List<BasicCoreComponent> findBCCByFromAccId(long fromAccId);
 
     public List<AssociationCoreComponent> findASCCByFromAccId(long fromAccId);
+
+    public Namespace findNamespace(long namespaceId);
+
+    public Module findModule(long moduleId);
 }
