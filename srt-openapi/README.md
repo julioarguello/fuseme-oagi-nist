@@ -117,7 +117,7 @@ Bundling thousands of CRUD operations into the super-schema would add noise with
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 1: Super-Schema  (this generator)                     │
 │  ─────────────────────────────────────────                    │
-│  oagis-10.3-super-schema.openapi.yaml                        │
+│  oagi-super-schema-10.3.0.yaml                               │
 │  Pure components/schemas catalog, x-oagis-* extensions       │
 │  Generated from CC database (ASCCP → ACC → BCC/ASCC)         │
 └──────────────────────────────┬───────────────────────────────┘
@@ -170,7 +170,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: './oagis-10.3-super-schema.openapi.yaml#/components/schemas/PurchaseOrder'
+                  $ref: './oagi-super-schema-10.3.0.yaml#/components/schemas/PurchaseOrder'
     post:
       operationId: createPurchaseOrder
       summary: Create a purchase order
@@ -180,7 +180,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: './oagis-10.3-super-schema.openapi.yaml#/components/schemas/PurchaseOrder'
+              $ref: './oagi-super-schema-10.3.0.yaml#/components/schemas/PurchaseOrder'
       responses:
         "201":
           description: Resource created
@@ -201,7 +201,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: './oagis-10.3-super-schema.openapi.yaml#/components/schemas/PurchaseOrder'
+                $ref: './oagi-super-schema-10.3.0.yaml#/components/schemas/PurchaseOrder'
 components:
   securitySchemes:
     bearerAuth:
@@ -296,7 +296,7 @@ $JAVA_HOME/bin/java -cp "$CLASSPATH" \
   org.oagi.srt.openapi.OpenApiApplication
 ```
 
-The YAML will be written to `./openapi-output/<RootSchema>.openapi.yaml`.
+The YAML will be written to `./openapi-output/oagi-purchase-order-10.3.0.yaml`.
 
 ### 6. Configure a Different Noun
 
@@ -315,6 +315,49 @@ $JAVA_HOME/bin/java -cp "$CLASSPATH" \
 | :----------------- | :------------------- | :------------------------------------------- |
 | `openapi.asccp`    | `Purchase Order`     | ASCCP property term (the root business noun)  |
 | `openapi.output`   | `./openapi-output`   | Directory where the YAML file is written      |
+| `openapi.mode`     | `single`             | Generation mode: `single`, `super`, or `api` |
+| `project.version`  | (from POM: `10.3.0`) | Version embedded in output filenames          |
+### Output File Naming Convention
+
+All generated files follow the pattern `oagi-{kebab-name}-{version}.yaml`:
+
+| Mode | Output |
+| :--- | :----- |
+| Single | `oagi-purchase-order-10.3.0.yaml` |
+| Super | `oagi-super-schema-10.3.0.yaml` |
+| API | `oagi-api-10.3.0.yaml` |
+
+The version (`10.3.0`) comes from the Maven POM `<version>`. The `10.3` prefix matches the OAGIS release; the patch (`.0`) increments with generator improvements.
+
+### Maven Artifact Distribution
+
+The generated schemas are packaged as a zip artifact for downstream consumption:
+
+```bash
+# Package (after running the generator)
+mvn package -pl srt-openapi -DskipTests
+
+# Install to local Maven repo
+mvn install -pl srt-openapi -DskipTests
+```
+
+**Coordinates**: `org.oagi:srt-openapi:10.3.0:zip:openapi`
+
+**Consumer POM** (e.g., `fuseme-oagi-semantic-mapper`):
+```xml
+<dependency>
+    <groupId>org.oagi</groupId>
+    <artifactId>srt-openapi</artifactId>
+    <version>10.3.0</version>
+    <type>zip</type>
+    <classifier>openapi</classifier>
+</dependency>
+```
+
+Unpack with `maven-dependency-plugin`:
+```bash
+mvn process-resources   # unpacks schemas to schemas/
+```
 
 ---
 
@@ -897,7 +940,7 @@ This example demonstrates:
 ### Lint with Redocly CLI
 
 ```bash
-npx -y @redocly/cli@latest lint openapi-output/PurchaseOrder.openapi.yaml \
+npx -y @redocly/cli@latest lint openapi-output/oagi-purchase-order-10.3.0.yaml \
   --skip-rule info-license --skip-rule no-unused-components
 ```
 
@@ -907,7 +950,7 @@ Expected: **0 errors**, 1 negligible warning (placeholder server URL).
 
 ```bash
 npx -y @redocly/cli@latest build-docs \
-  openapi-output/PurchaseOrder.openapi.yaml \
+  openapi-output/oagi-purchase-order-10.3.0.yaml \
   -o /tmp/purchase-order-docs.html
 
 open /tmp/purchase-order-docs.html
@@ -964,5 +1007,5 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_211.jdk/Contents/Hom
 | `x-oagis-content-component-definition` count | 27 |
 | Enum extensions     | `x-oagis-enum-descriptions`, `x-oagis-enum-labels`, `x-oagis-enum-source`, `x-oagis-enum-agency` |
 | Redocly lint errors | 0                   |
-| Output file         | `oagis-super-schema.openapi.yaml` |
+| Output file         | `oagi-super-schema-10.3.0.yaml` |
 | File size           | ~10 MB (247,892 lines) |

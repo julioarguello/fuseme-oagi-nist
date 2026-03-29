@@ -11,6 +11,7 @@ import org.oagi.srt.repository.entity.Release;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,8 @@ public class CcOpenApiGenerator {
 
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 
+	private static final String YAML_EXT = ".yaml";
+
 	@Autowired
 	private CcTreeWalker ccTreeWalker;
 
@@ -40,6 +43,10 @@ public class CcOpenApiGenerator {
 
 	@Autowired
 	private OperationOverlayBuilder operationOverlayBuilder;
+
+	/** Maven project.version (e.g., "10.3.0") — drives generated filenames. */
+	@Value("${project.version}")
+	private String projectVersion;
 
 	/**
 	 * Generate an OpenAPI YAML file for the given ASCCP property term.
@@ -68,7 +75,8 @@ public class CcOpenApiGenerator {
 				treeResult, asccpPropertyTerm + " API",
 				releaseNum);
 
-		return writeYaml(openApiDoc, outputDir, treeResult.getRootSchemaName() + ".openapi.yaml");
+		String kebab = toKebabCase(treeResult.getRootSchemaName());
+		return writeYaml(openApiDoc, outputDir, "oagi-" + kebab + "-" + projectVersion + YAML_EXT);
 	}
 
 	/**
@@ -91,7 +99,7 @@ public class CcOpenApiGenerator {
 		Map<String, Object> openApiDoc = openApiSchemaBuilder.buildSuper(
 				superResult, "OAGIS Core Components \u2014 Super Schema", releaseNum);
 
-		String fileName = "oagis-" + releaseNum + "-super-schema.openapi.yaml";
+		String fileName = "oagi-super-schema-" + projectVersion + YAML_EXT;
 		return writeYaml(openApiDoc, outputDir, fileName);
 	}
 
@@ -120,7 +128,7 @@ public class CcOpenApiGenerator {
 		operationOverlayBuilder.addOperations(openApiDoc, superResult.getRootSchemaNames());
 		logger.info("Added CRUD operations for {} root nouns", superResult.getRootSchemaNames().size());
 
-		String fileName = "oagis-" + releaseNum + "-api.openapi.yaml";
+		String fileName = "oagi-api-" + projectVersion + YAML_EXT;
 		return writeYaml(openApiDoc, outputDir, fileName);
 	}
 
@@ -144,6 +152,11 @@ public class CcOpenApiGenerator {
 
 		logger.info("OpenAPI spec written to: {}", outputFile.getAbsolutePath());
 		return outputFile;
+	}
+
+	/** Converts PascalCase to kebab-case: "PurchaseOrder" → "purchase-order". */
+	private String toKebabCase(String pascalCase) {
+		return pascalCase.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
 	}
 
 	/**
