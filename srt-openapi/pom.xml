@@ -97,9 +97,9 @@
 			</resource>
 		</resources>
 		<plugins>
-			<!-- Package openapi-output/ as a zip artifact (classifier: openapi).
-			     Install: mvn package -pl srt-openapi
-			     Coordinates: org.oagi:srt-openapi:10.3.0:zip:openapi -->
+			<!-- Package target/generated-schemas/ as a zip artifact (classifier: schemas).
+			     Uses schemas.xml assembly descriptor.
+			     Coordinates: org.oagi:srt-openapi:10.3.0:zip:schemas -->
 			<plugin>
 				<artifactId>maven-assembly-plugin</artifactId>
 				<version>3.7.1</version>
@@ -110,7 +110,7 @@
 						<goals><goal>single</goal></goals>
 						<configuration>
 							<descriptors>
-								<descriptor>src/assembly/openapi.xml</descriptor>
+								<descriptor>src/assembly/schemas.xml</descriptor>
 							</descriptors>
 						</configuration>
 					</execution>

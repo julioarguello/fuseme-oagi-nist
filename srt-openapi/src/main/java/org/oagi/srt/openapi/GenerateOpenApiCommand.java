@@ -33,7 +33,7 @@ public class GenerateOpenApiCommand implements CommandLineRunner {
 	@Value("${openapi.asccp:Purchase Order}")
 	private String asccpPropertyTerm;
 
-	@Value("${openapi.output:./openapi-output}")
+	@Value("${openapi.output:./srt-openapi/target/generated-schemas}")
 	private String outputPath;
 
 	@Value("${openapi.mode:single}")

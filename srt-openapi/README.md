@@ -270,18 +270,22 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_211.jdk/Contents/Hom
 
 ```bash
 cd /path/to/fuseme-oagi-nist
-mvn -pl srt-openapi compile -q
+mvn compile -am -pl srt-openapi -q
 ```
 
-> **Note:** Use `-pl srt-openapi` (without `-am`) to avoid dependency resolution issues from sibling modules. The `srt-import` classes must already be compiled in `srt-import/target/classes`.
+> **Note:** The `-am` flag (also-make) ensures `srt-import` (a dependency) is compiled too.
 
 ### 4. Build the Classpath
 
 ```bash
-CLASSPATH="$(mvn -pl srt-openapi dependency:build-classpath -q \
+CLASSPATH="srt-openapi/target/classes:srt-import/target/classes:\
+$(mvn -pl srt-openapi dependency:build-classpath -q \
   -DincludeScope=compile -Dmdep.outputFile=/dev/stdout):\
-srt-openapi/target/classes:srt-import/target/classes:$JAVA_HOME/lib/tools.jar"
+$JAVA_HOME/lib/tools.jar"
 ```
+
+> **Important:** `target/classes` must come before dependency JARs so the Maven-filtered
+> `application.yml` (which contains `project.version`) takes precedence.
 
 ### 5. Run the Generator
 
@@ -296,7 +300,7 @@ $JAVA_HOME/bin/java -cp "$CLASSPATH" \
   org.oagi.srt.openapi.OpenApiApplication
 ```
 
-The YAML will be written to `./openapi-output/oagi-purchase-order-10.3.0.yaml`.
+The YAML will be written to `./srt-openapi/target/generated-schemas/oagi-purchase-order-10.3.0.yaml`.
 
 ### 6. Configure a Different Noun
 
@@ -314,9 +318,9 @@ $JAVA_HOME/bin/java -cp "$CLASSPATH" \
 | Property           | Default              | Description                                  |
 | :----------------- | :------------------- | :------------------------------------------- |
 | `openapi.asccp`    | `Purchase Order`     | ASCCP property term (the root business noun)  |
-| `openapi.output`   | `./openapi-output`   | Directory where the YAML file is written      |
+| `openapi.output`   | `./srt-openapi/target/generated-schemas` | Directory where the YAML file is written |
 | `openapi.mode`     | `single`             | Generation mode: `single`, `super`, or `api` |
-| `project.version`  | (from POM: `10.3.0`) | Version embedded in output filenames          |
+| `project.version`  | Auto-resolved (`10.3.0`) | Version embedded in filenames (Maven-filtered via `application.yml`) |
 ### Output File Naming Convention
 
 All generated files follow the pattern `oagi-{kebab-name}-{version}.yaml`:
@@ -341,22 +345,66 @@ mvn package -pl srt-openapi -DskipTests
 mvn install -pl srt-openapi -DskipTests
 ```
 
-**Coordinates**: `org.oagi:srt-openapi:10.3.0:zip:openapi`
+**Coordinates**: `org.oagi:srt-openapi:10.3.0:zip:schemas`
 
 **Consumer POM** (e.g., `fuseme-oagi-semantic-mapper`):
 ```xml
+<properties>
+    <srt-openapi.version>10.3.0</srt-openapi.version>
+</properties>
+
 <dependency>
     <groupId>org.oagi</groupId>
     <artifactId>srt-openapi</artifactId>
-    <version>10.3.0</version>
+    <version>${srt-openapi.version}</version>
     <type>zip</type>
-    <classifier>openapi</classifier>
+    <classifier>schemas</classifier>
 </dependency>
 ```
 
 Unpack with `maven-dependency-plugin`:
 ```bash
 mvn process-resources   # unpacks schemas to schemas/
+```
+
+### Version Bump Procedure
+
+The version `10.3.z` follows the OAGIS release (`10.3`) with a patch counter (`z`) for
+generator changes. The version is defined **once** in the POM and auto-propagated via
+Maven resource filtering to `application.yml`, then to Spring `@Value` at runtime.
+
+**Bump the producer** (from `fuseme-oagi-nist/`):
+
+```bash
+# Bump srt-openapi to 10.3.1
+mvn -pl srt-openapi versions:set -DnewVersion=10.3.1 -DgenerateBackupPoms=false
+```
+
+This updates `srt-openapi/pom.xml` `<version>` in place (no backup files).
+
+**Align the consumer** (from `fuseme-oagi-semantic-mapper/`):
+
+```bash
+# Update <srt-openapi.version> property to 10.3.1
+mvn versions:set-property -Dproperty=srt-openapi.version \
+  -DnewVersion=10.3.1 -DgenerateBackupPoms=false
+```
+
+**Full bump workflow:**
+
+```bash
+# 1. Producer: bump + compile + generate + install
+cd fuseme-oagi-nist
+mvn -pl srt-openapi versions:set -DnewVersion=10.3.1 -DgenerateBackupPoms=false
+mvn compile -am -pl srt-openapi -q
+java -cp "$CLASSPATH" ... -Dopenapi.mode=super ...
+mvn install -pl srt-openapi -DskipTests -q
+
+# 2. Consumer: align + unpack
+cd ../fuseme-oagi-semantic-mapper
+mvn versions:set-property -Dproperty=srt-openapi.version \
+  -DnewVersion=10.3.1 -DgenerateBackupPoms=false
+mvn process-resources
 ```
 
 ---
@@ -940,7 +988,7 @@ This example demonstrates:
 ### Lint with Redocly CLI
 
 ```bash
-npx -y @redocly/cli@latest lint openapi-output/oagi-purchase-order-10.3.0.yaml \
+npx -y @redocly/cli@latest lint srt-openapi/target/generated-schemas/oagi-purchase-order-10.3.0.yaml \
   --skip-rule info-license --skip-rule no-unused-components
 ```
 
@@ -950,7 +998,7 @@ Expected: **0 errors**, 1 negligible warning (placeholder server URL).
 
 ```bash
 npx -y @redocly/cli@latest build-docs \
-  openapi-output/oagi-purchase-order-10.3.0.yaml \
+  srt-openapi/target/generated-schemas/oagi-purchase-order-10.3.0.yaml \
   -o /tmp/purchase-order-docs.html
 
 open /tmp/purchase-order-docs.html
