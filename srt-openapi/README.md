@@ -12,7 +12,7 @@ Generates [OpenAPI 3.1.0](https://spec.openapis.org/oas/v3.1.0) schemas from OAG
 - **Exhaustive description enrichment** — concatenated definitions from BCCP+BCC, ASCCP+ASCC, ACC qualifiers, and DataType definitions for maximum semantic density
 - **Schema-level metadata** — `deprecated`, `x-oagis-abstract`, discriminator patterns, and `x-oagis-version` extensions
 - **Property-level metadata** — `default` values, nullable types (OAS 3.1.0 `type: [T, "null"]`), and bounded array constraints
-- **Pure schema catalog** — no `paths`, `servers`, or `security` blocks; domain-specific APIs are defined via separate OpenAPI Overlay files (see [Architecture](#architecture-super-schema--overlays) below)
+- **Dual-mode output** — `single` mode generates one noun's schema with CRUD operations (RESTful paths + OAuth2 security); `super` mode generates a pure schema catalog (no `paths`, no `servers`) for semantic mapping
 - **`x-oagis-*` extension namespace** — all custom extensions use the `x-oagis-` prefix for consistency with Score and to avoid collisions with other OpenAPI tooling
 
 ---
@@ -319,17 +319,17 @@ $JAVA_HOME/bin/java -cp "$CLASSPATH" \
 | :----------------- | :------------------- | :------------------------------------------- |
 | `openapi.asccp`    | `Purchase Order`     | ASCCP property term (the root business noun)  |
 | `openapi.output`   | `./srt-openapi/target/generated-schemas` | Directory where the YAML file is written |
-| `openapi.mode`     | `single`             | Generation mode: `single`, `super`, or `api` |
+| `openapi.mode`     | `single`             | `single` (schema + CRUD ops for one noun) or `super` (all schemas, no ops). `api` is deprecated |
 | `project.version`  | Auto-resolved (`10.3.0`) | Version embedded in filenames (Maven-filtered via `application.yml`) |
 ### Output File Naming Convention
 
 All generated files follow the pattern `oagi-{kebab-name}-{version}.yaml`:
 
-| Mode | Output |
-| :--- | :----- |
-| Single | `oagi-purchase-order-10.3.0.yaml` |
-| Super | `oagi-super-schema-10.3.0.yaml` |
-| API | `oagi-api-10.3.0.yaml` |
+| Mode | Output | Content |
+| :--- | :----- | :------ |
+| Single | `oagi-purchase-order-10.3.0.yaml` | Schema + CRUD operations for one root ASCCP |
+| Super | `oagi-super-schema-10.3.0.yaml` | Schema catalog (all root ASCCPs, no operations) |
+| API *(deprecated)* | `oagi-api-10.3.0.yaml` | Super-schema + operations for ALL nouns (~13MB) |
 
 The version (`10.3.0`) comes from the Maven POM `<version>`. The `10.3` prefix matches the OAGIS release; the patch (`.0`) increments with generator improvements.
 

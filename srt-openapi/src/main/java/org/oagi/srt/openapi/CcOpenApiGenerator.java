@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -75,7 +76,12 @@ public class CcOpenApiGenerator {
 				treeResult, asccpPropertyTerm + " API",
 				releaseNum);
 
-		String kebab = toKebabCase(treeResult.getRootSchemaName());
+		// Add CRUD operations for the root ASCCP noun
+		String rootSchema = treeResult.getRootSchemaName();
+		operationOverlayBuilder.addOperations(openApiDoc, Collections.singletonList(rootSchema));
+		logger.info("Added CRUD operations for root noun: {}", rootSchema);
+
+		String kebab = toKebabCase(rootSchema);
 		return writeYaml(openApiDoc, outputDir, "oagi-" + kebab + "-" + projectVersion + YAML_EXT);
 	}
 
