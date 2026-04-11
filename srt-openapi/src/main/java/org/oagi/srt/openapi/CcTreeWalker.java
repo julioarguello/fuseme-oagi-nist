@@ -328,7 +328,7 @@ public class CcTreeWalker {
 			}
 
 			// Derive root name from ACC objectClassTerm (business document name)
-			String rootName = toCamelCase(roleOfAcc.getObjectClassTerm());
+			String rootName = toPascalCase(roleOfAcc.getObjectClassTerm());
 			logger.info("  [{}/{}] Walking root: {} (ASCCP ID={}, ACC='{}')",
 					count, roots.size(), rootName, asccp.getAsccpId(),
 					roleOfAcc.getObjectClassTerm());
@@ -350,7 +350,7 @@ public class CcTreeWalker {
 	 */
 	public TreeResult walkFromAsccp(AssociationCoreComponentProperty asccp) {
 		AggregateCoreComponent roleOfAcc = importedDataProvider.findACC(asccp.getRoleOfAccId());
-		String rootName = toCamelCase(asccp.getPropertyTerm());
+		String rootName = toPascalCase(asccp.getPropertyTerm());
 
 		WalkContext ctx = new WalkContext();
 		walkAcc(roleOfAcc, rootName, ctx);
@@ -431,11 +431,7 @@ public class CcTreeWalker {
 					? CcNode.Kind.BCC_ATTRIBUTE
 					: CcNode.Kind.BCC_ELEMENT;
 
-			String propName = toCamelCase(bccp.getPropertyTerm());
-			// Lowercase-start for attributes
-			if (kind == CcNode.Kind.BCC_ATTRIBUTE) {
-				propName = propName.substring(0, 1).toLowerCase() + propName.substring(1);
-			}
+			String propName = toLowerCamelCase(bccp.getPropertyTerm());
 
 			// Concatenate BCCP and BCC definitions as complementary paragraphs
 			String description = concatDescriptions(bccp.getDefinition(), bcc.getDefinition());
@@ -478,8 +474,8 @@ public class CcTreeWalker {
 				continue;
 			}
 
-			String childSchemaName = toCamelCase(asccp.getPropertyTerm());
-			String propName = childSchemaName.substring(0, 1).toLowerCase() + childSchemaName.substring(1);
+			String childSchemaName = toPascalCase(asccp.getPropertyTerm());
+			String propName = toLowerCamelCase(asccp.getPropertyTerm());
 
 			// Concatenate ASCCP and ASCC definitions as complementary paragraphs
 			String asccDescription = concatDescriptions(asccp.getDefinition(), ascc.getDefinition());
@@ -507,7 +503,7 @@ public class CcTreeWalker {
 		if (acc.getBasedAccId() > 0) {
 			AggregateCoreComponent basedAcc = importedDataProvider.findACC(acc.getBasedAccId());
 			if (basedAcc != null) {
-				String baseSchemaName = toCamelCase(basedAcc.getObjectClassTerm());
+				String baseSchemaName = toPascalCase(basedAcc.getObjectClassTerm());
 				ctx.baseSchemaMap.put(schemaName, baseSchemaName);
 				walkAcc(basedAcc, baseSchemaName, ctx);
 			}
@@ -560,22 +556,82 @@ public class CcTreeWalker {
 		return null;
 	}
 
-	private static String toCamelCase(String term) {
+	/**
+	 * PascalCase conversion for schema/type names.
+	 * Replicates Score's {@code Utility.toCamelCase()} exactly.
+	 *
+	 * Rules:
+	 * - Split on whitespace
+	 * - "Identifier" → "ID"
+	 * - All other words: capitalize first char, preserve rest
+	 *
+	 * Examples: "Purchase Order" → "PurchaseOrder",
+	 *           "Document Identifier" → "DocumentID",
+	 *           "BIC Identifier" → "BICID"
+	 */
+	private static String toPascalCase(String term) {
 		if (term == null || term.isEmpty()) {
 			return term;
 		}
 		StringBuilder sb = new StringBuilder();
-		for (String word : term.split("\\s+")) {
-			if (!word.isEmpty()) {
-				if ("Identifier".equals(word)) {
-					sb.append("Id");
-				} else {
-					sb.append(Character.toUpperCase(word.charAt(0)));
-					if (word.length() > 1) {
-						sb.append(word.substring(1));
-					}
-				}
+		for (String word : term.split(" ")) {
+			if (word.startsWith("_")) {
+				word = word.substring(0, 1);
 			}
+			if (word.startsWith(" ")) {
+				word = word.substring(0, 1);
+			}
+			if (word.toLowerCase().contains("identifier")) {
+				int posStart = word.toLowerCase().indexOf("identifier");
+				int posEnd = posStart + "identifier".length();
+				sb.append(word.substring(0, posStart)).append("ID").append(word.substring(posEnd));
+			} else if (!word.isEmpty()) {
+				sb.append(word.substring(0, 1).toUpperCase());
+				sb.append(word.substring(1));
+			}
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * camelCase conversion for property names.
+	 * Replicates Score's {@code Utility.toLowerCamelCase()} exactly.
+	 *
+	 * Rules:
+	 * - Split on whitespace
+	 * - "Identifier" → "ID"
+	 * - First non-Identifier word: lowercase entirely
+	 * - Subsequent non-Identifier words: capitalize first char, lowercase rest
+	 *
+	 * Examples: "Document Identifier" → "documentID",
+	 *           "BIC Identifier" → "bicID",
+	 *           "Identifier" → "ID"
+	 */
+	private static String toLowerCamelCase(String term) {
+		if (term == null || term.isEmpty()) {
+			return term;
+		}
+		StringBuilder sb = new StringBuilder();
+		int cnt = 0;
+		for (String word : term.split(" ")) {
+			if (word.startsWith("_")) {
+				word = word.substring(0, 1);
+			}
+			if (word.startsWith(" ")) {
+				word = word.substring(0, 1);
+			}
+			if (word.toLowerCase().contains("identifier")) {
+				int posStart = word.toLowerCase().indexOf("identifier");
+				int posEnd = posStart + "identifier".length();
+				sb.append(word.substring(0, posStart)).append("ID").append(word.substring(posEnd));
+			} else if (!word.isEmpty() && cnt != 0) {
+				sb.append(word.substring(0, 1).toUpperCase());
+				sb.append(word.substring(1).toLowerCase());
+			} else if (!word.isEmpty()) {
+				sb.append(word.substring(0, 1).toLowerCase());
+				sb.append(word.substring(1).toLowerCase());
+			}
+			cnt++;
 		}
 		return sb.toString();
 	}
