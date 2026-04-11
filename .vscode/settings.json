@@ -1,0 +1,17 @@
+{
+    "java.import.exclusions": [
+        "**/node_modules/**",
+        "**/.metadata/**",
+        "**/archetype-resources/**",
+        "**/META-INF/maven/**",
+        "**/srt-webapp/**",
+        "**/srt-bo/**"
+    ],
+    "java.project.referencedLibraries": [],
+    "terminal.integrated.env.osx": {
+        "PATH": "${workspaceFolder}/scripts:${env:PATH}"
+    },
+    "terminal.integrated.env.linux": {
+        "PATH": "${workspaceFolder}/scripts:${env:PATH}"
+    }
+}

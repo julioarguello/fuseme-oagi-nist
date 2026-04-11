@@ -1,6 +1,13 @@
 # srt-openapi application config
 # DB connection reuses the same MariaDB instance populated by srt-import.
+
+# Maven-filtered: ${project.version} is resolved at build time
+project:
+  version: ${project.version}
+
 spring:
+  profiles:
+    active: generate-openapi
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
     url: jdbc:mysql://localhost:3306/oagi?useSSL=false&allowPublicKeyRetrieval=true

@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.oagi</groupId>
 	<artifactId>srt-openapi</artifactId>
-	<version>1.0.0</version>
+	<version>10.3.0</version>
 	<packaging>jar</packaging>
 
 	<name>oagi-srt-openapi</name>
@@ -88,4 +88,34 @@
 	</dependencyManagement>
 
 	<!-- No spring-boot-maven-plugin: run via classpath (java -cp), same as srt-import -->
+
+	<build>
+		<resources>
+			<resource>
+				<directory>src/main/resources</directory>
+				<filtering>true</filtering>
+			</resource>
+		</resources>
+		<plugins>
+			<!-- Package target/generated-schemas/ as a zip artifact (classifier: schemas).
+			     Uses schemas.xml assembly descriptor.
+			     Coordinates: org.oagi:srt-openapi:10.3.0:zip:schemas -->
+			<plugin>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<version>3.7.1</version>
+				<executions>
+					<execution>
+						<id>openapi</id>
+						<phase>package</phase>
+						<goals><goal>single</goal></goals>
+						<configuration>
+							<descriptors>
+								<descriptor>src/assembly/schemas.xml</descriptor>
+							</descriptors>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
 </project>

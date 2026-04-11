@@ -8,18 +8,22 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+
 import java.io.File;
 
 /**
  * Spring Boot CLI runner that invokes the CC-to-OpenAPI generator.
  *
  * Activated by the Spring profile "generate-openapi".
- * Usage (single noun):
- *   java ... --openapi.asccp="Purchase Order" --openapi.output=./output
- * Usage (super schema):
- *   java ... --openapi.mode=super --openapi.output=./output
- * Usage (full API with operations):
- *   java ... --openapi.mode=api --openapi.output=./output
+ * Two primary modes:
+ *   single (default) - One ASCCP noun with CRUD operations (schema + RESTful paths)
+ *     java ... --openapi.asccp="Purchase Order" --openapi.output=./output
+ *   super - All root ASCCP nouns without operations (schema catalog for semantic mapping)
+ *     java ... --openapi.mode=super --openapi.output=./output
+ *
+ * Deprecated:
+ *   api - Super-schema + operations for ALL 1600+ nouns (use single mode instead)
+ *     java ... --openapi.mode=api --openapi.output=./output
  */
 @Component
 @Profile("generate-openapi")
@@ -33,7 +37,7 @@ public class GenerateOpenApiCommand implements CommandLineRunner {
 	@Value("${openapi.asccp:Purchase Order}")
 	private String asccpPropertyTerm;
 
-	@Value("${openapi.output:./openapi-output}")
+	@Value("${openapi.output:./srt-openapi/target/generated-schemas}")
 	private String outputPath;
 
 	@Value("${openapi.mode:single}")
